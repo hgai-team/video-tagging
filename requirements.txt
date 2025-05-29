@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+aiosqlite
+aiohttp
+google-generativeai
+pydantic
+anyio>=4.8.0
