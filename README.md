@@ -21,7 +21,7 @@ FastAPI service for asynchronous video processing and AI-powered content tagging
 
 1. **Clone and setup**:
 ```bash
-git clone <repository>
+git clone https://github.com/hgai-team/video-tagging.git
 cd video-tagging
 pip install -r requirements.txt
 ```
