@@ -1,0 +1,17 @@
+services:
+  qdrant-tagging:
+    image: qdrant/qdrant:latest
+    ports:
+      - 5333:6333
+      - 5334:6334
+    volumes:
+      - qdrant_tagging_data:/qdrant/storage
+    networks:
+      - tagging-network
+
+networks:
+  tagging-network:
+    external: true
+
+volumes:
+  qdrant_tagging_data:

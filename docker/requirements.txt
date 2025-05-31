@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic-settings
+
+aiohttp
+aiofiles
+
+google-genai
+qdrant_client
+sentence_transformers

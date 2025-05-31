@@ -1,3 +1,8 @@
 *.db
 *.log
 view.py
+.env
+*.ipynb
+**/model_weight/**
+*.py[cod]
+*/data/*
