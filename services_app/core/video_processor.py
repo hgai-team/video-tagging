@@ -14,15 +14,22 @@ logging.basicConfig(
 
 
 class VideoProcessor:
-    def __init__(self, timeout: int = 120, subprocess_timeout: int = 300):
+    def __init__(self, timeout: int = 360, subprocess_timeout: int = 360):
         self.timeout = timeout
         self.subprocess_timeout = subprocess_timeout
-        self.session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self.timeout)
-        )
+        self.session: aiohttp.ClientSession | None = None
 
-    async def close(self):
-        await self.session.close()
+    async def __aenter__(self):
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
+            )
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self.session is not None and not self.session.closed:
+            await self.session.close()
+        return False
 
     async def download_video(self, url: str, output_path: str) -> bool:
         """Download video from URL to local path (async, non-blocking)."""
@@ -73,7 +80,7 @@ class VideoProcessor:
         self,
         input_path: str,
         output_path: str,
-        hd_limit: int = 1280
+        hd_limit: int = 720
     ) -> bool:
         """
         Convert any video to 1 fps, non-blocking:
@@ -104,7 +111,7 @@ class VideoProcessor:
                 'ffmpeg', '-y',
                 '-i', input_path,
                 '-vf', vf,
-                '-an',                
+                '-an',
                 output_path
             ]
             rc, out, err = await self._run_cmd(*cmd)

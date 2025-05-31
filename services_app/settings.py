@@ -13,10 +13,17 @@ class Settings(BaseSettings):
 
     MAX_RETRIES: int
     RETRY_DELAY: int
-    
+
     QDRANT_HOST: str
     QDRANT_PORT: str
     VECTOR_SIZE: int
+
+    CRON_LIST: str
+
+    UNLABEL_URL: str
+    OLD_VERSION_URL: str
+    DOWNLOAD_URL: str
+    TAGS_URL: str
 
 @lru_cache
 def get_settings():

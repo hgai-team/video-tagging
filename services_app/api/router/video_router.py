@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Any, Optional
 from pathlib import Path
 
-from core import video_pro, video_tag
+from core import video_pro, video_tag, VideoProcessor
 
 app = APIRouter(
     prefix='/api/v3/video',
@@ -20,10 +20,11 @@ class ResponseModel(BaseModel):
 @app.post('/download', response_model=ResponseModel)
 async def download_video(url: str, output_path: str):
     try:
-        result = await video_pro.download_video(url=url, output_path=output_path)
+        async with VideoProcessor() as processor:
+            result = await processor.download_video(url=url, output_path=output_path)
         if not result:
             raise HTTPException(status_code=400, detail="Download failed")
-        await video_pro.close()
+
         return {
             "success": True,
             "data": {"message": "Video downloaded", "path": output_path},
