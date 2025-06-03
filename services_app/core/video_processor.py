@@ -14,7 +14,7 @@ logging.basicConfig(
 
 
 class VideoProcessor:
-    def __init__(self, timeout: int = 360, subprocess_timeout: int = 360):
+    def __init__(self, timeout: int = 3600, subprocess_timeout: int = 3600):
         self.timeout = timeout
         self.subprocess_timeout = subprocess_timeout
         self.session: aiohttp.ClientSession | None = None

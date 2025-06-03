@@ -2,7 +2,7 @@ import asyncio
 import logging
 import seqlog
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from datetime import datetime
 
 from api.router.stock_router import get_unlabel_resources, get_download_url, send_tags
@@ -19,6 +19,10 @@ seqlog.log_to_seq(
 )
 logger = logging.getLogger(__name__)
 
+# Constants
+MAX_TEMP_VIDEOS = 10
+TAG_VERSION = "v3"
+TEMP_VIDEOS_DIR = "./temp_videos"
 
 
 class PipelineProcessor:
@@ -33,12 +37,12 @@ class PipelineProcessor:
         logger.info(f"PipelineProcessor initialized - max_downloads={max_concurrent_downloads}, max_processing={max_concurrent_processing}")
         
     async def process_daily_batch(self, media_type: int, start_date: str, end_date: str, collection_name: str):
-        """Main pipeline process with batching"""
+        """Main pipeline process with batching and duration-based sorting"""
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         logger.info(f"Starting daily batch - batch_id={batch_id}, media_type={media_type}")
         
         try:
-            # Step 1: Get unlabel resources
+            # Step 1: Get unlabel resources with duration
             logger.info(f"Step 1: Getting unlabel resources - batch_id={batch_id}")
             unlabel_data = await get_unlabel_resources(
                 media_type=media_type, 
@@ -49,27 +53,22 @@ class PipelineProcessor:
             if not unlabel_data or not isinstance(unlabel_data, list):
                 logger.warning(f"No resources found - batch_id={batch_id}")
                 return
-                
-            resource_ids = [item.get('id') for item in unlabel_data if item.get('id')]
-            logger.info(f"Found resources - batch_id={batch_id}, count={len(resource_ids)}, ids={resource_ids}")
+            
+            # Extract and sort resources by duration
+            resources_with_duration = self._prepare_resources_by_duration(unlabel_data, batch_id)
+            
+            if not resources_with_duration:
+                logger.warning(f"No valid resources after filtering - batch_id={batch_id}")
+                return
+            
+            logger.info(f"Found valid resources - batch_id={batch_id}, count={len(resources_with_duration)}")
             
             # Step 2: Get download URLs concurrently
             logger.info(f"Step 2: Getting download URLs - batch_id={batch_id}")
-            download_tasks = [self._get_download_url_safe(resource_id, batch_id) for resource_id in resource_ids]
-            url_results = await asyncio.gather(*download_tasks, return_exceptions=True)
+            resources_with_urls = await self._get_download_urls_batch(resources_with_duration, batch_id)
             
-            # Filter successful URLs
-            valid_downloads = []
-            for i, result in enumerate(url_results):
-                if isinstance(result, Exception):
-                    logger.error(f"Failed to get download URL - batch_id={batch_id}, resource_id={resource_ids[i]}, error={str(result)}")
-                else:
-                    valid_downloads.append((resource_ids[i], result))
-            
-            logger.info(f"Valid download URLs - batch_id={batch_id}, count={len(valid_downloads)}")
-            
-            # Process in batches of max_concurrent_downloads
-            await self._process_download_batches(valid_downloads, collection_name, batch_id)
+            # Step 3-8: Process with file management
+            await self._process_with_file_management(resources_with_urls, collection_name, batch_id)
                 
             logger.info(f"Batch processing completed - batch_id={batch_id}")
             
@@ -77,76 +76,158 @@ class PipelineProcessor:
             logger.error(f"Pipeline batch failed - batch_id={batch_id}, error={str(e)}")
             raise
     
-    async def _process_download_batches(self, valid_downloads: List, collection_name: str, batch_id: str):
-        """Process downloads in batches of max_concurrent_downloads"""
+    def _prepare_resources_by_duration(self, unlabel_data: List[Dict], batch_id: str) -> List[Tuple[str, int]]:
+        """Extract resources, filter by duration > 0, and sort by duration"""
+        resources = []
         
-        for i in range(0, len(valid_downloads), self.max_concurrent_downloads):
-            current_batch = valid_downloads[i:i + self.max_concurrent_downloads]
-            batch_num = (i // self.max_concurrent_downloads) + 1
+        for item in unlabel_data:
+            resource_id = item.get('id')
+            duration = item.get('duration', 0)
             
-            logger.info(f"Processing download batch {batch_num} - batch_id={batch_id}, count={len(current_batch)}")
-            
-            # Step 3: Download current batch
-            logger.info(f"Step 3: Downloading videos batch {batch_num} - batch_id={batch_id}")
-            download_tasks = [self._download_video_safe(resource_id, url_data, batch_id) 
-                            for resource_id, url_data in current_batch]
-            downloaded_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-            
-            # Filter successful downloads
-            valid_files = []
-            for j, result in enumerate(downloaded_results):
-                if isinstance(result, Exception):
-                    resource_id = current_batch[j][0]
-                    logger.error(f"Failed to download video - batch_id={batch_id}, resource_id={resource_id}, error={str(result)}")
-                else:
-                    valid_files.append(result)
-            
-            logger.info(f"Successfully downloaded batch {batch_num} - batch_id={batch_id}, count={len(valid_files)}")
-            
-            # 🚀 PARALLEL PROCESSING: Process all videos in current batch concurrently
-            if valid_files:
-                logger.info(f"Starting parallel video processing - batch_id={batch_id}, video_count={len(valid_files)}, max_concurrent={self.max_concurrent_processing}")
-                
-                # Create tasks for all videos in this batch
-                video_processing_tasks = [
-                    self._process_single_video_concurrent(file_info, collection_name, batch_id) 
-                    for file_info in valid_files
-                ]
-                
-                # Process all videos concurrently with semaphore control
-                processing_results = await asyncio.gather(*video_processing_tasks, return_exceptions=True)
-                
-                # Log results
-                successful_count = 0
-                failed_count = 0
-                for k, result in enumerate(processing_results):
-                    resource_id = valid_files[k]['resource_id']
-                    if isinstance(result, Exception):
-                        failed_count += 1
-                        logger.error(f"Video processing failed - batch_id={batch_id}, resource_id={resource_id}, error={str(result)}")
-                    else:
-                        successful_count += 1
-                        logger.info(f"Video processing completed - batch_id={batch_id}, resource_id={resource_id}")
-                
-                logger.info(f"Batch {batch_num} processing summary - batch_id={batch_id}, successful={successful_count}, failed={failed_count}, total={len(valid_files)}")
-            
-            logger.info(f"Completed processing batch {batch_num} - batch_id={batch_id}")
+            if resource_id and duration > 0:
+                resources.append((resource_id, duration))
+            elif resource_id and duration == 0:
+                logger.debug(f"Skipping resource with zero duration - batch_id={batch_id}, resource_id={resource_id}")
+        
+        # Sort by duration (low to high)
+        resources.sort(key=lambda x: x[1])
+        
+        logger.info(f"Resources sorted by duration - batch_id={batch_id}, total={len(resources)}, "
+                   f"min_duration={resources[0][1] if resources else 0}, "
+                   f"max_duration={resources[-1][1] if resources else 0}")
+        
+        return resources
     
-    async def _get_download_url_safe(self, resource_id: str, batch_id: str):
+    async def _get_download_urls_batch(self, resources_with_duration: List[Tuple[str, int]], batch_id: str) -> List[Dict]:
+        """Get download URLs for all resources concurrently"""
+        download_tasks = [
+            self._get_download_url_safe(resource_id, duration, batch_id) 
+            for resource_id, duration in resources_with_duration
+        ]
+        url_results = await asyncio.gather(*download_tasks, return_exceptions=True)
+        
+        # Filter successful URLs
+        valid_resources = []
+        for i, result in enumerate(url_results):
+            resource_id, duration = resources_with_duration[i]
+            if isinstance(result, Exception):
+                logger.error(f"Failed to get download URL - batch_id={batch_id}, resource_id={resource_id}, error={str(result)}")
+            else:
+                valid_resources.append({
+                    'resource_id': resource_id,
+                    'duration': duration,
+                    'url_data': result
+                })
+        
+        logger.info(f"Valid download URLs - batch_id={batch_id}, count={len(valid_resources)}")
+        return valid_resources
+    
+    async def _process_with_file_management(self, resources_with_urls: List[Dict], collection_name: str, batch_id: str):
+        """Process resources with file count management"""
+        Path(TEMP_VIDEOS_DIR).mkdir(exist_ok=True)
+        
+        remaining_resources = resources_with_urls.copy()
+        
+        while remaining_resources:
+            # Step 3: Download up to MAX_TEMP_VIDEOS files
+            logger.info(f"Step 3: Downloading batch - batch_id={batch_id}, remaining={len(remaining_resources)}")
+            
+            current_temp_files = self._count_temp_files()
+            available_slots = MAX_TEMP_VIDEOS - current_temp_files
+            
+            if available_slots <= 0:
+                logger.warning(f"Temp folder full - batch_id={batch_id}, current_files={current_temp_files}")
+                break
+            
+            # Take resources to download (up to available slots)
+            to_download = remaining_resources[:available_slots]
+            remaining_resources = remaining_resources[available_slots:]
+            
+            logger.info(f"Downloading files - batch_id={batch_id}, count={len(to_download)}, remaining_after={len(remaining_resources)}")
+            
+            # Download current batch
+            downloaded_files = await self._download_batch(to_download, batch_id)
+            
+            if downloaded_files:
+                # Step 4-8: Process downloaded files
+                await self._process_video_files(downloaded_files, collection_name, batch_id)
+            
+            # If there are more resources, continue the loop
+            if remaining_resources:
+                logger.info(f"Continuing with remaining resources - batch_id={batch_id}, count={len(remaining_resources)}")
+        
+        if remaining_resources:
+            logger.warning(f"Some resources were not processed due to file limitations - batch_id={batch_id}, count={len(remaining_resources)}")
+    
+    def _count_temp_files(self) -> int:
+        """Count current files in temp_videos directory"""
+        temp_path = Path(TEMP_VIDEOS_DIR)
+        if not temp_path.exists():
+            return 0
+        return len([f for f in temp_path.iterdir() if f.is_file() and f.suffix == '.mp4'])
+    
+    async def _download_batch(self, resources: List[Dict], batch_id: str) -> List[Dict]:
+        """Download a batch of resources concurrently"""
+        download_tasks = [
+            self._download_video_safe(resource['resource_id'], resource['url_data'], resource['duration'], batch_id)
+            for resource in resources
+        ]
+        
+        downloaded_results = await asyncio.gather(*download_tasks, return_exceptions=True)
+        
+        # Filter successful downloads
+        valid_files = []
+        for i, result in enumerate(downloaded_results):
+            resource_id = resources[i]['resource_id']
+            if isinstance(result, Exception):
+                logger.error(f"Failed to download video - batch_id={batch_id}, resource_id={resource_id}, error={str(result)}")
+            else:
+                valid_files.append(result)
+        
+        logger.info(f"Successfully downloaded - batch_id={batch_id}, count={len(valid_files)}")
+        return valid_files
+    
+    async def _process_video_files(self, downloaded_files: List[Dict], collection_name: str, batch_id: str):
+        """Process downloaded video files through the pipeline"""
+        logger.info(f"Starting video processing - batch_id={batch_id}, video_count={len(downloaded_files)}")
+        
+        # Process all videos concurrently with semaphore control
+        video_processing_tasks = [
+            self._process_single_video_concurrent(file_info, collection_name, batch_id)
+            for file_info in downloaded_files
+        ]
+        
+        processing_results = await asyncio.gather(*video_processing_tasks, return_exceptions=True)
+        
+        # Log results
+        successful_count = 0
+        failed_count = 0
+        for i, result in enumerate(processing_results):
+            resource_id = downloaded_files[i]['resource_id']
+            if isinstance(result, Exception):
+                failed_count += 1
+                logger.error(f"Video processing failed - batch_id={batch_id}, resource_id={resource_id}, error={str(result)}")
+            else:
+                successful_count += 1
+                logger.info(f"Video processing completed - batch_id={batch_id}, resource_id={resource_id}")
+        
+        logger.info(f"Processing summary - batch_id={batch_id}, successful={successful_count}, failed={failed_count}, total={len(downloaded_files)}")
+    
+    async def _get_download_url_safe(self, resource_id: str, duration: int, batch_id: str):
         """Safely get download URL for a resource"""
         try:
             result = await get_download_url(id=resource_id)
-            logger.info(f"Get download URL success - batch_id={batch_id}, resource_id={resource_id}")
+            logger.info(f"Get download URL success - batch_id={batch_id}, resource_id={resource_id}, duration={duration}")
             return result
         except Exception as e:
-            logger.error(f"Get download URL failed - batch_id={batch_id}, resource_id={resource_id}, step=get_download_url, error={str(e)}")
+            logger.error(f"Get download URL failed - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, error={str(e)}")
             raise
     
-    async def _download_video_safe(self, resource_id: str, url_data: Dict, batch_id: str):
+    async def _download_video_safe(self, resource_id: str, url_data: Dict, duration: int, batch_id: str):
         """Safely download video with semaphore"""
         async with self.download_semaphore:
             try:
-                logger.info(f"Starting download process - batch_id={batch_id}, resource_id={resource_id}")
+                logger.info(f"Starting download process - batch_id={batch_id}, resource_id={resource_id}, duration={duration}")
                 
                 # Check various possible URL fields
                 download_url = None
@@ -163,58 +244,58 @@ class PipelineProcessor:
                     logger.error(f"No download URL found - batch_id={batch_id}, resource_id={resource_id}, available_fields={available_fields}")
                     raise ValueError(f"No download URL found. Available fields: {available_fields}")
                 
-                output_path = f"./temp_videos/{resource_id}.mp4"
-                Path("./temp_videos").mkdir(exist_ok=True)
+                output_path = f"{TEMP_VIDEOS_DIR}/{resource_id}.mp4"
                 
-                logger.info(f"Attempting to download - batch_id={batch_id}, resource_id={resource_id}, url={download_url}, output_path={output_path}")
+                logger.info(f"Attempting to download - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, url={download_url}, output_path={output_path}")
                 
                 async with VideoProcessor() as processor:
                     result = await processor.download_video(url=download_url, output_path=output_path)
                     
-                logger.info(f"Download completed successfully - batch_id={batch_id}, resource_id={resource_id}, output_path={output_path}, result={result}")
+                logger.info(f"Download completed successfully - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, output_path={output_path}")
                 
                 return {
                     'resource_id': resource_id,
+                    'duration': duration,
                     'original_path': output_path,
                     'url_data': url_data
                 }
                 
             except Exception as e:
-                logger.error(f"Download video failed - batch_id={batch_id}, resource_id={resource_id}, step=download_video, error={str(e)}, error_type={type(e).__name__}")
+                logger.error(f"Download video failed - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, error={str(e)}, error_type={type(e).__name__}")
                 import traceback
                 logger.error(f"Download traceback - batch_id={batch_id}, resource_id={resource_id}, traceback={traceback.format_exc()}")
                 raise
     
     async def _process_single_video_concurrent(self, file_info: Dict, collection_name: str, batch_id: str):
         """Process a single video through steps 4-8 with concurrent control"""
-        # Use semaphore to limit concurrent video processing
         async with self.processing_semaphore:
             return await self._process_single_video(file_info, collection_name, batch_id)
     
     async def _process_single_video(self, file_info: Dict, collection_name: str, batch_id: str):
         """Process a single video through steps 4-8 (sequential within single video)"""
         resource_id = file_info['resource_id']
+        duration = file_info['duration']
         original_path = file_info['original_path']
         
         processed_path = None
         start_time = asyncio.get_event_loop().time()
         
         try:
-            logger.info(f"Starting video processing pipeline - batch_id={batch_id}, resource_id={resource_id}")
+            logger.info(f"Starting video processing pipeline - batch_id={batch_id}, resource_id={resource_id}, duration={duration}")
             
-            # Step 4: Shrink video (sequential - required)
+            # Step 4: Shrink video
             logger.info(f"Step 4: Shrinking video - batch_id={batch_id}, resource_id={resource_id}")
-            processed_path = f"./temp_videos/{resource_id}_processed.mp4"
+            processed_path = f"{TEMP_VIDEOS_DIR}/{resource_id}_processed.mp4"
             await shrink_video(input_path=original_path, output_path=processed_path)
             logger.info(f"Step 4 completed - batch_id={batch_id}, resource_id={resource_id}")
             
-            # Step 5: Video tagging (sequential - depends on step 4)
+            # Step 5: Video tagging
             logger.info(f"Step 5: Video tagging - batch_id={batch_id}, resource_id={resource_id}")
             tagging_result = await video_tagging(input_path=processed_path)
             tags_data = tagging_result.get('data', {})
             logger.info(f"Step 5 completed - batch_id={batch_id}, resource_id={resource_id}, tags_count={len(tags_data) if isinstance(tags_data, dict) else 'unknown'}")
             
-            # Steps 6 & 7: Parallel execution (both depend on step 5 results)
+            # Steps 6 & 7: Parallel execution
             logger.info(f"Steps 6&7: Parallel upsert and send - batch_id={batch_id}, resource_id={resource_id}")
             
             upsert_task = self._upsert_points_safe(collection_name, tags_data, resource_id, batch_id)
@@ -223,7 +304,7 @@ class PipelineProcessor:
             # Execute steps 6 & 7 concurrently
             step67_results = await asyncio.gather(upsert_task, send_task, return_exceptions=True)
             
-            # Check results of parallel steps
+            # Check results
             upsert_success = not isinstance(step67_results[0], Exception)
             send_success = not isinstance(step67_results[1], Exception)
             
@@ -241,10 +322,11 @@ class PipelineProcessor:
             end_time = asyncio.get_event_loop().time()
             processing_time = round(end_time - start_time, 2)
             
-            logger.info(f"Video processing pipeline completed - batch_id={batch_id}, resource_id={resource_id}, processing_time={processing_time}s, upsert_success={upsert_success}, send_success={send_success}")
+            logger.info(f"Video processing pipeline completed - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, processing_time={processing_time}s, upsert_success={upsert_success}, send_success={send_success}")
             
             return {
                 'resource_id': resource_id,
+                'duration': duration,
                 'success': True,
                 'processing_time': processing_time,
                 'upsert_success': upsert_success,
@@ -254,11 +336,11 @@ class PipelineProcessor:
         except Exception as e:
             end_time = asyncio.get_event_loop().time()
             processing_time = round(end_time - start_time, 2)
-            logger.error(f"Video processing pipeline failed - batch_id={batch_id}, resource_id={resource_id}, processing_time={processing_time}s, error={str(e)}")
+            logger.error(f"Video processing pipeline failed - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, processing_time={processing_time}s, error={str(e)}")
             raise
         
         finally:
-            # Step 8: Delete local files (can be parallel)
+            # Step 8: Delete local files
             try:
                 logger.info(f"Step 8: Cleaning up files - batch_id={batch_id}, resource_id={resource_id}")
                 
@@ -299,7 +381,7 @@ class PipelineProcessor:
             await send_tags(
                 id=resource_id,
                 tags=tags_data,
-                tag_version="v3"
+                tag_version=TAG_VERSION
             )
             return True
         except Exception as e:
