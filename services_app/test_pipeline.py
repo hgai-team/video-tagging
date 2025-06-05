@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from unlabled_pipeline import PipelineProcessor
+from pipeline import PipelineProcessor
 
 # Configure basic logging for testing
 logging.basicConfig(

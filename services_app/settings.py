@@ -18,8 +18,6 @@ class Settings(BaseSettings):
     QDRANT_PORT: str
     VECTOR_SIZE: int
 
-    CRON_LIST: str
-
     UNLABEL_URL: str
     OLD_VERSION_URL: str
     DOWNLOAD_URL: str

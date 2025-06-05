@@ -18,7 +18,11 @@ class DailyScheduler:
         try:
             # Use current time in UTC with timezone-aware datetime
             end_date = dt.datetime.now(dt.timezone.utc)
+<<<<<<< HEAD:services_app/scheduler.py
             start_date = end_date - timedelta(days=5)
+=======
+            start_date = end_date - timedelta(days=150)
+>>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords):services_app/unlabled_scheduler.py
             
             # Format dates to match YYYY-MM-DDTHH:MM:SS.sssZ
             formatted_start_date = start_date.strftime('%Y-%m-%dT00:00:00.000Z')
@@ -44,9 +48,15 @@ class DailyScheduler:
         # Schedule for 8:00, 14:00, 20:00 daily
         self.scheduler.add_job(
             self.run_daily_pipeline, 
+<<<<<<< HEAD:services_app/scheduler.py
             CronTrigger(hour=11, minute=31), 
             id='daily_11am31', 
             name='Daily Pipeline 11AM31'
+=======
+            CronTrigger(hour=15, minute=13), 
+            id='daily_18am40', 
+            name='Daily Pipeline 18AM40'
+>>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords):services_app/unlabled_scheduler.py
         )
         self.scheduler.add_job(
             self.run_daily_pipeline, 

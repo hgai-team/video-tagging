@@ -4,20 +4,14 @@ import seqlog
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 from datetime import datetime
-<<<<<<< HEAD
-=======
 import traceback
 import os
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
 
-from api.router.stock_router import get_unlabel_resources, get_download_url, send_tags
+from api.router.stock_router import get_resources_old_version, get_download_url, send_tags
 from api.router.video_router import shrink_video, video_tagging, delete_video
 from api.router.tags_router import upsert_points
 from core import VideoProcessor
-<<<<<<< HEAD
-=======
 from db import task_tracker
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
 
 # Configure seqlog
 seqlog.log_to_seq(
@@ -30,15 +24,12 @@ logger = logging.getLogger(__name__)
 
 # Constants
 MAX_TEMP_VIDEOS = 10
-TAG_VERSION = "v3"
+TAG_VERSION = "v3_Jun05"
 TEMP_VIDEOS_DIR = "./temp_videos"
-<<<<<<< HEAD
-=======
-MIN_VIDEO_SIZE_MB = 20  # Minimum video size in MB
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
+MIN_VIDEO_SIZE_MB = 2  # Minimum video size in MB
 
 
-class PipelineProcessor:
+class OldVersionPipelineProcessor:
     def __init__(self, max_concurrent_downloads: int = 10, max_concurrent_processing: int = 10):
         self.max_concurrent_downloads = max_concurrent_downloads
         self.max_concurrent_processing = max_concurrent_processing
@@ -47,40 +38,36 @@ class PipelineProcessor:
         self.download_semaphore = asyncio.Semaphore(max_concurrent_downloads)
         self.processing_semaphore = asyncio.Semaphore(max_concurrent_processing)
         
-        logger.info(f"PipelineProcessor initialized - max_downloads={max_concurrent_downloads}, max_processing={max_concurrent_processing}")
+        logger.info(f"OldVersionPipelineProcessor initialized - max_downloads={max_concurrent_downloads}, max_processing={max_concurrent_processing}")
         
-    async def process_daily_batch(self, media_type: int, start_date: str, end_date: str, collection_name: str):
-        """Main pipeline process with batching and duration-based sorting"""
-        batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        logger.info(f"Starting daily batch - batch_id={batch_id}, media_type={media_type}")
+    async def process_old_version_batch(self, current_tag_version: str, media_type: int, collection_name: str):
+        """Main pipeline process for old version resources with batching and duration-based sorting"""
+        batch_id = f"old_version_batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        logger.info(f"Starting old version batch - batch_id={batch_id}, current_tag_version={current_tag_version}, media_type={media_type}")
         
         try:
-<<<<<<< HEAD
-=======
             # Cleanup any leftover files from previous batches
             await self._batch_cleanup_temp_folder(batch_id)
             
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
-            # Step 1: Get unlabel resources with duration
-            logger.info(f"Step 1: Getting unlabel resources - batch_id={batch_id}")
-            unlabel_data = await get_unlabel_resources(
-                media_type=media_type, 
-                start_date=start_date, 
-                end_date=end_date
+            # Step 1: Get old version resources with duration
+            logger.info(f"Step 1: Getting old version resources - batch_id={batch_id}")
+            old_version_data = await get_resources_old_version(
+                current_tag_version=current_tag_version,
+                media_type=media_type
             )
             
-            if not unlabel_data or not isinstance(unlabel_data, list):
-                logger.warning(f"No resources found - batch_id={batch_id}")
+            if not old_version_data or not isinstance(old_version_data, list):
+                logger.warning(f"No old version resources found - batch_id={batch_id}")
                 return
             
             # Extract and sort resources by duration
-            resources_with_duration = self._prepare_resources_by_duration(unlabel_data, batch_id)
+            resources_with_duration = self._prepare_resources_by_duration(old_version_data, batch_id)
             
             if not resources_with_duration:
-                logger.warning(f"No valid resources after filtering - batch_id={batch_id}")
+                logger.warning(f"No valid old version resources after filtering - batch_id={batch_id}")
                 return
             
-            logger.info(f"Found valid resources - batch_id={batch_id}, count={len(resources_with_duration)}")
+            logger.info(f"Found valid old version resources - batch_id={batch_id}, count={len(resources_with_duration)}")
             
             # Step 2: Get download URLs concurrently
             logger.info(f"Step 2: Getting download URLs - batch_id={batch_id}")
@@ -95,15 +82,12 @@ class PipelineProcessor:
             logger.error(f"Pipeline batch failed - batch_id={batch_id}, error={str(e)}")
             raise
     
-<<<<<<< HEAD
-=======
 
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
-    def _prepare_resources_by_duration(self, unlabel_data: List[Dict], batch_id: str) -> List[Tuple[str, int]]:
+    def _prepare_resources_by_duration(self, old_version_data: List[Dict], batch_id: str) -> List[Tuple[str, int]]:
         """Extract resources, filter by duration > 0, and sort by duration"""
         resources = []
         
-        for item in unlabel_data:
+        for item in old_version_data:
             resource_id = item.get('id')
             duration = item.get('duration', 0)
             
@@ -116,20 +100,12 @@ class PipelineProcessor:
         resources.sort(key=lambda x: x[1])
         
         logger.info(f"Resources sorted by duration - batch_id={batch_id}, total={len(resources)}, "
-<<<<<<< HEAD
-                   f"min_duration={resources[0][1] if resources else 0}, "
-                   f"max_duration={resources[-1][1] if resources else 0}")
-        
-        return resources
-    
-=======
                 f"min_duration={resources[0][1] if resources else 0}, "
                 f"max_duration={resources[-1][1] if resources else 0}")
         
         return resources
     
 
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
     async def _get_download_urls_batch(self, resources_with_duration: List[Tuple[str, int]], batch_id: str) -> List[Dict]:
         """Get download URLs for all resources concurrently"""
         download_tasks = [
@@ -140,10 +116,7 @@ class PipelineProcessor:
         
         # Filter successful URLs
         valid_resources = []
-<<<<<<< HEAD
-=======
         
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
         for i, result in enumerate(url_results):
             resource_id, duration = resources_with_duration[i]
             if isinstance(result, Exception):
@@ -203,24 +176,6 @@ class PipelineProcessor:
         return len([f for f in temp_path.iterdir() if f.is_file() and f.suffix == '.mp4'])
     
     async def _download_batch(self, resources: List[Dict], batch_id: str) -> List[Dict]:
-<<<<<<< HEAD
-        """Download a batch of resources concurrently"""
-        download_tasks = [
-            self._download_video_safe(resource['resource_id'], resource['url_data'], resource['duration'], batch_id)
-            for resource in resources
-        ]
-        
-        downloaded_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-        
-        # Filter successful downloads
-        valid_files = []
-        for i, result in enumerate(downloaded_results):
-            resource_id = resources[i]['resource_id']
-            if isinstance(result, Exception):
-                logger.error(f"Failed to download video - batch_id={batch_id}, resource_id={resource_id}, error={str(result)}")
-            else:
-                valid_files.append(result)
-=======
         """Download a batch of resources sequentially"""
         valid_files = []
         
@@ -240,7 +195,6 @@ class PipelineProcessor:
                     # Task already marked as skipped in _download_video_safe
                 else:
                     logger.error(f"Failed to download video - batch_id={batch_id}, resource_id={resource_id}, error={str(e)}")
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
         
         logger.info(f"Successfully downloaded - batch_id={batch_id}, count={len(valid_files)}")
         return valid_files
@@ -282,37 +236,6 @@ class PipelineProcessor:
             raise
     
     async def _download_video_safe(self, resource_id: str, url_data: Dict, duration: int, batch_id: str):
-<<<<<<< HEAD
-        """Safely download video with semaphore"""
-        async with self.download_semaphore:
-            try:
-                logger.info(f"Starting download process - batch_id={batch_id}, resource_id={resource_id}, duration={duration}")
-                
-                # Check various possible URL fields
-                download_url = None
-                url_fields = ['url', 'download_url', 'downloadUrl', 'link', 'videoUrl']
-                
-                for field in url_fields:
-                    if field in url_data and url_data[field]:
-                        download_url = url_data[field]
-                        logger.info(f"Found download URL - batch_id={batch_id}, resource_id={resource_id}, field={field}")
-                        break
-                
-                if not download_url:
-                    available_fields = list(url_data.keys())
-                    logger.error(f"No download URL found - batch_id={batch_id}, resource_id={resource_id}, available_fields={available_fields}")
-                    raise ValueError(f"No download URL found. Available fields: {available_fields}")
-                
-                output_path = f"{TEMP_VIDEOS_DIR}/{resource_id}.mp4"
-                
-                logger.info(f"Attempting to download - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, url={download_url}, output_path={output_path}")
-                
-                async with VideoProcessor() as processor:
-                    result = await processor.download_video(url=download_url, output_path=output_path)
-                    
-                logger.info(f"Download completed successfully - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, output_path={output_path}")
-                
-=======
         """Safely download video with synchronous requests"""
         # Start tracking the task before we do any work
         task_tracker.start_task(resource_id, batch_id)
@@ -372,21 +295,10 @@ class PipelineProcessor:
                     raise ValueError(f"Video file size too small: {file_size_mb:.2f}MB < {MIN_VIDEO_SIZE_MB}MB")
                 
                 # Tiếp tục nếu file đủ lớn
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
                 return {
                     'resource_id': resource_id,
                     'duration': duration,
                     'original_path': output_path,
-<<<<<<< HEAD
-                    'url_data': url_data
-                }
-                
-            except Exception as e:
-                logger.error(f"Download video failed - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, error={str(e)}, error_type={type(e).__name__}")
-                import traceback
-                logger.error(f"Download traceback - batch_id={batch_id}, resource_id={resource_id}, traceback={traceback.format_exc()}")
-                raise
-=======
                     'url_data': url_data,
                     'file_size': file_size,
                     'file_size_mb': file_size_mb
@@ -406,14 +318,11 @@ class PipelineProcessor:
             
             # Trả về lỗi để caller xử lý
             raise
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
     
     async def _process_single_video_concurrent(self, file_info: Dict, collection_name: str, batch_id: str):
         """Process a single video through steps 4-8 with concurrent control"""
         async with self.processing_semaphore:
             return await self._process_single_video(file_info, collection_name, batch_id)
-<<<<<<< HEAD
-=======
         
     async def _batch_cleanup_temp_folder(self, batch_id: str):
         """Clean up any remaining files from previous batches"""
@@ -444,25 +353,17 @@ class PipelineProcessor:
                         
         except Exception as e:
             logger.error(f"Batch temp cleanup failed - batch_id={batch_id}, error={e}")
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
     
     async def _process_single_video(self, file_info: Dict, collection_name: str, batch_id: str):
         """Process a single video through steps 4-8 (sequential within single video)"""
         resource_id = file_info['resource_id']
         duration = file_info['duration']
         original_path = file_info['original_path']
-<<<<<<< HEAD
-=======
         file_size_mb = file_info.get('file_size_mb', 0)
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
         
         processed_path = None
         start_time = asyncio.get_event_loop().time()
         
-<<<<<<< HEAD
-        try:
-            logger.info(f"Starting video processing pipeline - batch_id={batch_id}, resource_id={resource_id}, duration={duration}")
-=======
         # Track all files that need cleanup
         cleanup_files = []
         if original_path:
@@ -470,16 +371,12 @@ class PipelineProcessor:
         
         try:
             logger.info(f"Starting video processing pipeline - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, file_size={file_size_mb:.2f}MB")
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
             
             # Step 4: Shrink video
             logger.info(f"Step 4: Shrinking video - batch_id={batch_id}, resource_id={resource_id}")
             processed_path = f"{TEMP_VIDEOS_DIR}/{resource_id}_processed.mp4"
-<<<<<<< HEAD
-=======
             cleanup_files.append(('processed', processed_path))  # Add to cleanup list immediately
             
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
             await shrink_video(input_path=original_path, output_path=processed_path)
             logger.info(f"Step 4 completed - batch_id={batch_id}, resource_id={resource_id}")
             
@@ -518,12 +415,9 @@ class PipelineProcessor:
             
             logger.info(f"Video processing pipeline completed - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, processing_time={processing_time}s, upsert_success={upsert_success}, send_success={send_success}")
             
-<<<<<<< HEAD
-=======
             # Mark task as successful
             task_tracker.mark_success(resource_id, batch_id)
             
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
             return {
                 'resource_id': resource_id,
                 'duration': duration,
@@ -536,34 +430,6 @@ class PipelineProcessor:
         except Exception as e:
             end_time = asyncio.get_event_loop().time()
             processing_time = round(end_time - start_time, 2)
-<<<<<<< HEAD
-            logger.error(f"Video processing pipeline failed - batch_id={batch_id}, resource_id={resource_id}, duration={duration}, processing_time={processing_time}s, error={str(e)}")
-            raise
-        
-        finally:
-            # Step 8: Delete local files
-            try:
-                logger.info(f"Step 8: Cleaning up files - batch_id={batch_id}, resource_id={resource_id}")
-                
-                cleanup_tasks = []
-                if original_path and Path(original_path).exists():
-                    cleanup_tasks.append(self._delete_video_safe(original_path, resource_id, batch_id, "original"))
-                    
-                if processed_path and Path(processed_path).exists():
-                    cleanup_tasks.append(self._delete_video_safe(processed_path, resource_id, batch_id, "processed"))
-                
-                if cleanup_tasks:
-                    cleanup_results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-                    
-                    cleanup_success = sum(1 for result in cleanup_results if not isinstance(result, Exception))
-                    logger.info(f"Step 8 completed - batch_id={batch_id}, resource_id={resource_id}, files_cleaned={cleanup_success}/{len(cleanup_tasks)}")
-                else:
-                    logger.info(f"Step 8 completed - batch_id={batch_id}, resource_id={resource_id}, no_files_to_clean=True")
-                    
-            except Exception as e:
-                logger.error(f"File cleanup failed - batch_id={batch_id}, resource_id={resource_id}, step=delete_video, error={str(e)}")
-    
-=======
             
             # Get the full stack trace
             error_trace = traceback.format_exc()
@@ -673,7 +539,6 @@ class PipelineProcessor:
             logger.error(f"Force delete failed - batch_id={batch_id}, resource_id={resource_id}, file_type={file_type}, error={str(e)}")
             raise
 
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
     async def _upsert_points_safe(self, collection_name: str, tags_data: Dict, resource_id: str, batch_id: str):
         """Safely upsert points with error handling"""
         try:
@@ -686,11 +551,7 @@ class PipelineProcessor:
         except Exception as e:
             logger.error(f"Upsert points failed - batch_id={batch_id}, resource_id={resource_id}, error={str(e)}")
             raise
-<<<<<<< HEAD
-    
-=======
 
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
     async def _send_tags_safe(self, resource_id: str, tags_data: Dict, batch_id: str):
         """Safely send tags with error handling"""
         try:
@@ -703,11 +564,7 @@ class PipelineProcessor:
         except Exception as e:
             logger.error(f"Send tags failed - batch_id={batch_id}, resource_id={resource_id}, error={str(e)}")
             raise
-<<<<<<< HEAD
-    
-=======
 
->>>>>>> c620456 (Update Pipeline and Scheduler, Add Logging Database and fix Duplicate keywords)
     async def _delete_video_safe(self, file_path: str, resource_id: str, batch_id: str, file_type: str):
         """Safely delete video file with error handling"""
         try:
