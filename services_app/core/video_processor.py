@@ -1,9 +1,7 @@
 import os
-import asyncio
+import requests
 import logging
-
-import aiohttp
-import aiofiles
+import asyncio
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -17,32 +15,35 @@ class VideoProcessor:
     def __init__(self, timeout: int = 3600, subprocess_timeout: int = 3600):
         self.timeout = timeout
         self.subprocess_timeout = subprocess_timeout
-        self.session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self):
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.timeout)
-            )
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        if self.session is not None and not self.session.closed:
-            await self.session.close()
         return False
 
     async def download_video(self, url: str, output_path: str) -> bool:
-        """Download video from URL to local path (async, non-blocking)."""
-        if not self.session:
-            raise RuntimeError("ClientSession not initialized; use 'async with VideoProcessor()'.")
-        async with self.session.get(url) as resp:
-            if resp.status != 200:
-                logger.error(f"Download failed: HTTP {resp.status}")
-                raise RuntimeError(f"Download failed: HTTP {resp.status}")
-            async with aiofiles.open(output_path, 'wb') as f:
-                async for chunk in resp.content.iter_chunked(8192):
-                    await f.write(chunk)
-        return True
+        """Download video from URL to local path (sync, blocking)."""
+        try:
+            # Sử dụng requests đồng bộ để tải xuống
+            response = requests.get(url, timeout=self.timeout, stream=True)
+            
+            if response.status_code != 200:
+                logger.error(f"Download failed: HTTP {response.status_code}")
+                raise RuntimeError(f"Download failed: HTTP {response.status_code}")
+            
+            # Ghi file đồng bộ
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk: 
+                        f.write(chunk)
+            
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error during download: {str(e)}")
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            raise RuntimeError(f"Download error: {str(e)}")
 
     async def _run_cmd(self, *args: str) -> tuple[int, str, str]:
         """Chạy subprocess không block event loop, với timeout."""

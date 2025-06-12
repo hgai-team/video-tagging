@@ -184,5 +184,3 @@ class PointProcessor:
         except Exception as e:
             logger.exception(f"[delete_points] Lỗi không xác định khi delete points từ '{collection_name}': {e}")
             raise RuntimeError(f"Lỗi khi delete points từ '{collection_name}': {e}")
-
-
