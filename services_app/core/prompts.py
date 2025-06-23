@@ -33,4 +33,3 @@ Please analyze the video I’ve provided and extract all tags organized into the
   "video_description": /* 1 paragraph comprehensively describing the entire video */
 }
 '''
-

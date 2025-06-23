@@ -50,6 +50,3 @@ class VideoTagging:
         text = part[0].text
 
         return json_parser(text)
-
-
-

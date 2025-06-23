@@ -117,14 +117,12 @@ async def send_tags(
                 for sub_key, sub_val in value.items():
                     new_key = f"{key}_{sub_key}"
                     if isinstance(sub_val, list):
-                        # Loại bỏ các giá trị trùng lặp trong list
-                        flat[new_key] = list(dict.fromkeys(sub_val))
+                        flat[new_key] = sub_val
                     else:
                         flat[new_key] = [sub_val]
             else:
                 if isinstance(value, list):
-                    # Loại bỏ các giá trị trùng lặp trong list
-                    flat[key] = list(dict.fromkeys(value))
+                    flat[key] = value
                 else:
                     flat[key] = [value]
         return flat

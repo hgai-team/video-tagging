@@ -4,6 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    TAG_API_KEY: str
+    TAG_DOMAIN: str
+
     GOOGLEAI_API_KEY: str
     GOOGLEAI_MODEL: str
 
@@ -22,6 +25,7 @@ class Settings(BaseSettings):
     OLD_VERSION_URL: str
     DOWNLOAD_URL: str
     TAGS_URL: str
+    FILE_INFO_TAG_VERSION: str
 
 @lru_cache
 def get_settings():

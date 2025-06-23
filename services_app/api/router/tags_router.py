@@ -17,7 +17,8 @@ async def upsert_points(
     *,
     collection_name: str = Path(...),
     points: List[Dict[str, Any]],
-    ids: List[str]
+    ids: List[str]    
+    
 ):
     try:
         result = await point_pro.upsert_points(
