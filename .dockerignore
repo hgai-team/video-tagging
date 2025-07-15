@@ -10,3 +10,4 @@ venv/
 .dockerignore
 *.log
 temp_videos/* 
+*.db

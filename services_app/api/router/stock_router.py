@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException
 
-from settings import get_settings
+from config.settings import get_settings
 
 app = APIRouter(
     prefix='/stock',

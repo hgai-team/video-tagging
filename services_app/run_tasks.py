@@ -1,17 +1,15 @@
-# services_app/main.py
 import asyncio
 import logging
-import argparse  # <-- Thêm thư viện này
+import argparse 
 import seqlog
 from schedulers.app_scheduler import AppScheduler
-from config import LOG_LEVEL
+from config.config import LOG_LEVEL
 
-# Configure logging... (giữ nguyên)
 logging.basicConfig(level=LOG_LEVEL)
 seqlog.log_to_seq(
     server_url="http://localhost:5341",
     level=LOG_LEVEL,
-    batch_size=10,
+    batch_size=20,
     auto_flush_timeout=2
 )
 logger = logging.getLogger(__name__)
@@ -24,8 +22,8 @@ def setup_arg_parser():
         'pipelines',
         nargs='*',  # '*' có nghĩa là 0 hoặc nhiều tham số
         type=int,
-        choices=[1, 2, 3], # Chỉ chấp nhận các giá trị 1, 2, 3
-        help="Run specific pipelines: 1=Unlabeled, 2=OldVersion, 3=MissUpsert. "
+        choices=[1, 2, 3, 4], # Chấp nhận các giá trị 1, 2, 3, 4
+        help="Run specific pipelines: 1=Unlabeled, 2=OldVersion, 3=MissUpsert, 4=RealDetection. "
              "If no arguments are provided, the full scheduler will run."
     )
     return parser
@@ -52,8 +50,10 @@ async def main():
         if 3 in args.pipelines:
             tasks_to_run.append(scheduler._run_miss_upsert_pipeline())
             logger.info("--> Queued: 3 (Miss Upsert Pipeline)")
+        if 4 in args.pipelines:
+            tasks_to_run.append(scheduler._run_detection_pipeline())
+            logger.info("--> Queued: 4 (Real Detection Pipeline)")
 
-        # Chạy các pipeline đã chọn đồng thời
         if tasks_to_run:
             await asyncio.gather(*tasks_to_run)
             logger.info("Specified pipeline runs have completed.")
@@ -61,7 +61,6 @@ async def main():
         # Thoát chương trình sau khi chạy xong
         return
 
-    # Nếu không có tham số nào, chạy scheduler như bình thường
     logger.info("No specific pipelines requested. Starting full scheduler mode.")
     try:
         scheduler.start()

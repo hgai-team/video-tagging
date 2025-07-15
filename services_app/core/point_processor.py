@@ -8,7 +8,7 @@ from typing import List, Dict,Any
 
 from sentence_transformers import SentenceTransformer
 
-from settings import get_settings
+from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -78,12 +78,20 @@ class PointProcessor:
             "color": [],
             "visual_attributes": [],
             "camera_techniques": [],
-            "video_description": ""
+            "video_description": "",
+            "is_real":"str",
+            "time":"int"
         }
         """
         try:
             str_keys = ",".join(extract_list_strings(point))
             des = point.get("video_description", "")
+            
+            if "is_real" not in point:
+                point["is_real"] = "untagged" 
+                
+            if "time" not in point:
+                point["time"] = 0
 
             point_struct = models.PointStruct(
                 id=id,
@@ -95,6 +103,7 @@ class PointProcessor:
             )
 
             return point_struct
+        
         except RuntimeError as re:
             logger.error(f"[handle_point] RuntimeError id={id}: {re}")
             raise

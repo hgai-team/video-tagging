@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, Query, HTTPException
-from typing import List, Dict, Any
+from typing import List
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -30,9 +30,7 @@ async def get_failed_tasks(
     start_date: str = Query(...),
     end_date: str = Query(...)
 ):
-    """
-    Get all failed tasks within the specified date range.
-    
+    """    
     Date in ISO 8601 format (YYYY-MM-DDTHH:MM:SS.sssZ)
     """
     try:
@@ -45,8 +43,7 @@ async def get_failed_tasks(
                 status_code=400, 
                 detail="Invalid date format. Please use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.sssZ)"
             )
-        
-        # Get failed tasks
+
         failed_tasks = task_tracker.get_failed_tasks(start_date, end_date)
         
         logger.info(f"Retrieved {len(failed_tasks)} failed tasks between {start_date} and {end_date}")

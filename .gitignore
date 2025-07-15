@@ -6,3 +6,6 @@ view.py
 **/model_weight/**
 *.py[cod]
 */data/*
+**structure.txt
+**/temp_videos/** 
+**/logs/** 

@@ -10,7 +10,6 @@ logging.basicConfig(
     handlers=[logging.FileHandler("./logs/video_processor.log"), logging.StreamHandler()]
 )
 
-
 class VideoProcessor:
     def __init__(self, timeout: int = 3600, subprocess_timeout: int = 3600):
         self.timeout = timeout

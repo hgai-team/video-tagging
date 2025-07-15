@@ -1,4 +1,3 @@
-# services_app/schedulers/app_scheduler.py
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
@@ -8,8 +7,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from pipelines.base_pipeline import GenericPipelineProcessor
-from pipelines.data_sources import UnlabeledDataSource, OldVersionDataSource, MissUpsertDataSource
-from config import UNLABELED_CONFIG, OLD_VERSION_CONFIG, MISS_UPSERT_CONFIG
+from pipelines.data_sources import UnlabeledDataSource, OldVersionDataSource, MissUpsertDataSource, TaggedUnclassifiedDataSource
+from config.config import UNLABELED_CONFIG, OLD_VERSION_CONFIG, MISS_UPSERT_CONFIG, REAL_DETECTION_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ class AppScheduler:
             logger.warning(f"Miss-upsert job triggered at an odd hour {now_local.hour}, skipping.")
             return
 
-        offset_end_days = (index - 1) * 30
+        offset_end_days = 0# (index - 1) * 30
         offset_start_days = index * 30
 
         now_utc = now_local.astimezone(timezone.utc)
@@ -71,6 +70,16 @@ class AppScheduler:
         logger.info(f"Starting miss-upsert pipeline job for window #{index}")
         processor = GenericPipelineProcessor(MISS_UPSERT_CONFIG, MissUpsertDataSource())
         await processor.run(start_date=formatted_start_date, end_date=formatted_end_date)
+        
+    async def _run_detection_pipeline(self):
+        logger.info("Starting detection pipeline job")
+        
+        processor = GenericPipelineProcessor(
+            REAL_DETECTION_CONFIG, 
+            TaggedUnclassifiedDataSource()
+        )
+        
+        await processor.run_detection(batch_size=2000)
 
     def start(self):
         """Add all jobs to the scheduler and start it."""
@@ -93,9 +102,16 @@ class AppScheduler:
         # Job 3: Miss Upsert (Copy lịch từ scheduler gốc)
         self.scheduler.add_job(
             self._run_miss_upsert_pipeline,
-            CronTrigger(hour="*/2", minute=1, timezone=self.local_tz), # Chạy lệch 1 phút để tránh xung đột
+            CronTrigger(hour="*/2", minute=1, timezone=self.local_tz),
             id='miss_upsert_pipeline_job',
             name='Miss Upsert Pipeline every 2 hours (UTC+7)'
+        )
+        
+        self.scheduler.add_job(
+            self._run_detection_pipeline,
+            CronTrigger(hour="*/24", minute=30, timezone=self.local_tz), 
+            id='detection_pipeline_job',
+            name='Real Detection Pipeline every 24 hours (UTC+7)'
         )
 
         self.scheduler.start()
@@ -111,5 +127,6 @@ class AppScheduler:
         await asyncio.gather(
             self._run_unlabeled_pipeline(),
             self._run_old_version_pipeline(),
-            self._run_miss_upsert_pipeline()
+            self._run_miss_upsert_pipeline(),
+            self._run_detection_pipeline()
         )

@@ -33,3 +33,17 @@ Please analyze the video I’ve provided and extract all tags organized into the
   "video_description": /* 1 paragraph comprehensively describing the entire video */
 }
 '''
+
+VIDEO_DETECTION_PROMPT = '''
+You are a Video Reality & AI Integration Detector.
+Your mission is to analyze this video and determine:
+
+STEP 1: First, determine if this is a real-life scene or live footage in reality that filmed by human (answer "true" or "false")
+STEP 2: Second, determine if the video has AI-generated imagery integrated into it (hybrid layers between real footage and AI-generated content) or 100% AI-generated (answer "true" or "false")
+
+Return your response in JSON format with:
+- "is_real_life": true/false (based on step 1). If you are not uncertained and sured, return false.
+- "has_ai_elements": true/false (based on step 2)
+
+Example output: {"is_real_life": true/false, "has_ai_elements": false/true}
+'''

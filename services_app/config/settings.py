@@ -9,11 +9,10 @@ class Settings(BaseSettings):
 
     GOOGLEAI_API_KEY: str
     GOOGLEAI_MODEL: str
+    GOOGLEAI_DETECTION_MODEL: str 
 
     MODEL_PATH: str
-
     MAX_CONCURRENT_TASKS: int
-
     MAX_RETRIES: int
     RETRY_DELAY: int
 

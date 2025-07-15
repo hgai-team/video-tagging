@@ -1,4 +1,3 @@
-# services_app/config.py
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,8 +19,6 @@ class PipelineConfig:
     max_concurrent_downloads: int
     max_concurrent_processing: int
     min_video_size_mb: int
-
-# --- Định nghĩa các cấu hình cho từng pipeline ---
 
 UNLABELED_CONFIG = PipelineConfig(
     name="unlabeled",
@@ -53,5 +50,16 @@ MISS_UPSERT_CONFIG = PipelineConfig(
     temp_dir=BASE_TEMP_DIR / "miss_upsert",
     max_concurrent_downloads=10,
     max_concurrent_processing=10,
+    min_video_size_mb=MIN_VIDEO_SIZE_MB,
+)
+
+REAL_DETECTION_CONFIG = PipelineConfig(
+    name="real_detection",
+    collection_name=COLLECTION_NAME,
+    tag_version=TAG_VERSION,
+    media_type=2,
+    temp_dir=BASE_TEMP_DIR / "real_detection",
+    max_concurrent_downloads=20,
+    max_concurrent_processing=20,
     min_video_size_mb=MIN_VIDEO_SIZE_MB,
 )

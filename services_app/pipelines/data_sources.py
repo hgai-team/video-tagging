@@ -1,9 +1,9 @@
-# services_app/pipelines/data_sources.py
+import asyncio
 import abc
 import logging
 import requests
-from typing import List, Dict, Optional
-from settings import get_settings
+from typing import List, Dict
+from config.settings import get_settings
 from api.router.stock_router import get_unlabel_resources, get_resources_old_version
 
 logger = logging.getLogger(__name__)
@@ -74,3 +74,54 @@ class MissUpsertDataSource(BaseDataSource):
 
         # Return in the expected format, using a default duration as it's not provided
         return [{'id': point_id, 'duration': 20} for point_id in missing_ids]
+
+class TaggedUnclassifiedDataSource(BaseDataSource):
+    """Nguồn dữ liệu cho các video đã tagged nhưng chưa phân loại real/AI."""
+    async def get_resources(self, collection_name: str, **kwargs) -> List[Dict]:
+        logger.info(f"Fetching tagged but unclassified videos from collection {collection_name}")
+        try:
+            settings = get_settings()
+            batch_size = kwargs.get('batch_size', 100)
+            offset = kwargs.get('offset', 0)
+            
+            # Sử dụng URL API chính xác
+            url = f"{settings.TAG_DOMAIN}af/collections/{collection_name}/points/tagged"
+            
+            # Tham số query
+            params = {
+                "is_real": "untagged",
+                "limit": batch_size,
+                "offset": offset
+            }
+            
+            headers = {'Accept': 'application/json'}
+            
+            # Gọi API bất đồng bộ
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: requests.get(url=url, headers=headers, params=params, timeout=60)
+            )
+            
+            # Kiểm tra response
+            if response.status_code != 200:
+                logger.error(f"API call failed: {response.status_code} - {response.text}")
+                return []
+                
+            # Parse response
+            response_data = response.json()
+            if not response_data.get('success', False):
+                logger.error(f"API returned error: {response_data.get('error')}")
+                return []
+                
+            video_ids = response_data.get('data', {}).get('video_ids', [])
+            
+            # Chuyển đổi thành định dạng phù hợp với pipeline
+            resources = [{'id': video_id, 'duration': 0} for video_id in video_ids]
+            
+            logger.info(f"Found {len(resources)} tagged but unclassified videos")
+            return resources
+            
+        except Exception as e:
+            logger.error(f"Error in TaggedUnclassifiedDataSource: {str(e)}")
+            return []

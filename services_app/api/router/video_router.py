@@ -3,10 +3,10 @@ from pydantic import BaseModel
 from typing import Any, Optional
 from pathlib import Path
 
-from core import video_pro, video_tag, VideoProcessor
+from core import video_pro, video_tag, video_detect, VideoProcessor
 
 app = APIRouter(
-    prefix='/api/v3/video',
+    prefix='video',
     tags=['Video']
 )
 
@@ -84,6 +84,26 @@ async def delete_video(input_path: str):
         return {
             "success": True,
             "data": {"message": "File deleted"},
+            "error": None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post('/detect-real', response_model=ResponseModel)
+async def detect_real_or_ai(input_path: str):
+    try:
+        path = Path(input_path)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        video_bytes = path.read_bytes()
+        detection_result = await video_detect.detect(video_bytes=video_bytes)
+        
+        return {
+            "success": True,
+            "data": detection_result,
             "error": None
         }
     except HTTPException:

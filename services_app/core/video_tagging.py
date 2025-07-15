@@ -5,10 +5,10 @@ import logging
 from google import genai
 from google.genai import types
 
-from settings import get_settings
+from config.settings import get_settings
 
-from .prompts import VIDEO_TAGGING_PROMPT
-from .parser import json_parser
+from utils.prompts import VIDEO_TAGGING_PROMPT
+from utils.parser import json_parser
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
