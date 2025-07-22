@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     GOOGLEAI_API_KEY: str
     GOOGLEAI_MODEL: str
+    GOOGLEAI_AUDIO: str
     GOOGLEAI_DETECTION_MODEL: str 
 
     MODEL_PATH: str

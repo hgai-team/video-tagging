@@ -1,10 +1,10 @@
 import logging
 from fastapi import APIRouter, Query, HTTPException
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel
 
-from db import task_tracker
+from utils.db import task_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +13,13 @@ app = APIRouter(
     tags=['Tasks']
 )
 
-
 class FailedTaskResponse(BaseModel):
     resource_id: str
     batch_id: str
     start_time: str
     end_time: str
     status: str
-
+    error_message: Optional[str] = None
 
 @app.get(
     '/failed',

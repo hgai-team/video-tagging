@@ -17,14 +17,21 @@ logger = logging.getLogger(__name__)
 
 def setup_arg_parser():
     """Thiết lập trình phân tích cú pháp tham số dòng lệnh."""
-    parser = argparse.ArgumentParser(description="Run specific pipelines or the full scheduler.")
+    parser = argparse.ArgumentParser(description="Run specific pipeline or the full scheduler.")
     parser.add_argument(
-        'pipelines',
-        nargs='*',  # '*' có nghĩa là 0 hoặc nhiều tham số
+        'pipeline',
+        nargs='?',  # '?' có nghĩa là 0 hoặc 1 tham số
         type=int,
-        choices=[1, 2, 3, 4], # Chấp nhận các giá trị 1, 2, 3, 4
-        help="Run specific pipelines: 1=Unlabeled, 2=OldVersion, 3=MissUpsert, 4=RealDetection. "
-             "If no arguments are provided, the full scheduler will run."
+        choices=[1, 2, 3, 4, 5, 6, 7], # 7 lựa chọn pipeline
+        help="""Run a specific pipeline:
+                1=Unlabeled Video,
+                2=Unlabeled Audio,
+                3=OldVersion Video,
+                4=OldVersion Audio,
+                5=MissUpsert Video,
+                6=MissUpsert Audio,
+                7=RealDetection Video.
+                If no argument is provided, the full scheduler will run."""
     )
     return parser
 
@@ -36,32 +43,42 @@ async def main():
 
     scheduler = AppScheduler()
 
-    # Nếu có tham số pipeline được truyền vào, chỉ chạy các pipeline đó và thoát
-    if args.pipelines:
-        logger.info(f"Running specified pipelines based on arguments: {args.pipelines}")
+    # Nếu có tham số pipeline được truyền vào, chỉ chạy pipeline đó và thoát
+    if args.pipeline:
+        logger.info(f"Running specified pipeline: {args.pipeline}")
 
-        tasks_to_run = []
-        if 1 in args.pipelines:
-            tasks_to_run.append(scheduler._run_unlabeled_pipeline())
-            logger.info("--> Queued: 1 (Unlabeled Pipeline)")
-        if 2 in args.pipelines:
-            tasks_to_run.append(scheduler._run_old_version_pipeline())
-            logger.info("--> Queued: 2 (Old Version Pipeline)")
-        if 3 in args.pipelines:
-            tasks_to_run.append(scheduler._run_miss_upsert_pipeline())
-            logger.info("--> Queued: 3 (Miss Upsert Pipeline)")
-        if 4 in args.pipelines:
-            tasks_to_run.append(scheduler._run_detection_pipeline())
-            logger.info("--> Queued: 4 (Real Detection Pipeline)")
+        task_to_run = None
+        
+        # Xử lý từng pipeline cụ thể
+        if args.pipeline == 1:
+            task_to_run = scheduler._run_unlabeled_video_pipeline()
+            logger.info("--> Running: Unlabeled Video Pipeline")
+        elif args.pipeline == 2:
+            task_to_run = scheduler._run_unlabeled_audio_pipeline()
+            logger.info("--> Running: Unlabeled Audio Pipeline")
+        elif args.pipeline == 3:
+            task_to_run = scheduler._run_old_version_video_pipeline()
+            logger.info("--> Running: Old Version Video Pipeline")
+        elif args.pipeline == 4:
+            task_to_run = scheduler._run_old_version_audio_pipeline()
+            logger.info("--> Running: Old Version Audio Pipeline")
+        elif args.pipeline == 5:
+            task_to_run = scheduler._run_miss_upsert_video_pipeline()
+            logger.info("--> Running: Miss Upsert Video Pipeline")
+        elif args.pipeline == 6:
+            task_to_run = scheduler._run_miss_upsert_audio_pipeline()
+            logger.info("--> Running: Miss Upsert Audio Pipeline")
+        elif args.pipeline == 7:
+            task_to_run = scheduler._run_detection_pipeline()
+            logger.info("--> Running: Real Detection Pipeline")
 
-        if tasks_to_run:
-            await asyncio.gather(*tasks_to_run)
-            logger.info("Specified pipeline runs have completed.")
+        if task_to_run:
+            await task_to_run
+            logger.info("Pipeline run has completed.")
 
-        # Thoát chương trình sau khi chạy xong
         return
 
-    logger.info("No specific pipelines requested. Starting full scheduler mode.")
+    logger.info("No specific pipeline requested. Starting full scheduler mode.")
     try:
         scheduler.start()
 

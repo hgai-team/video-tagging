@@ -1,7 +1,5 @@
-from typing import List, Dict, Any
-
+from typing import List, Dict, Any, Query
 from fastapi import APIRouter, Path, HTTPException
-
 from core import point_pro
 
 
@@ -17,14 +15,16 @@ async def upsert_points(
     *,
     collection_name: str = Path(...),
     points: List[Dict[str, Any]],
-    ids: List[str]    
+    ids: List[str],
+    media_type: str = Query(...)    
     
 ):
     try:
         result = await point_pro.upsert_points(
             collection_name=collection_name,
             points=points,
-            ids=ids
+            ids=ids,
+            media_type=media_type
         )
         return {
             "success": True,

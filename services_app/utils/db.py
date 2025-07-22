@@ -2,8 +2,7 @@ import os
 import sqlite3
 import logging
 import datetime
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -14,11 +13,7 @@ class DB:
     def __init__(self, db_path: str = "database/tasks.db"):
         """Initialize the database connection"""
         self.db_path = db_path
-        
-        # Ensure database directory exists
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        
-        # Initialize the database if it doesn't exist
         self._init_db()
     
     def _init_db(self):
@@ -27,7 +22,7 @@ class DB:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Create tasks table
+            # Create tasks table with added error_message field
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +30,8 @@ class DB:
                 batch_id TEXT NOT NULL,
                 start_time TEXT NOT NULL,
                 end_time TEXT,
-                status TEXT NOT NULL
+                status TEXT NOT NULL,
+                error_message TEXT
             )
             ''')
             
@@ -60,7 +56,7 @@ class DB:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            start_time = datetime.datetime.now().isoformat()
+            start_time = datetime.datetime.utcnow().isoformat()
             
             cursor.execute(
                 'INSERT INTO tasks (resource_id, batch_id, start_time, status) VALUES (?, ?, ?, ?)',
@@ -79,8 +75,8 @@ class DB:
             if conn:
                 conn.close()
     
-    def update_task_status(self, resource_id: str, batch_id: str, status: str) -> bool:
-        """Update task status to SUCCESS or FAILED"""
+    def update_task_status(self, resource_id: str, batch_id: str, status: str, error_message: str = None) -> bool:
+        """Update task status to SUCCESS or FAILED with optional error message"""
         if status not in ['SUCCESS', 'FAILED']:
             raise ValueError("Status must be either 'SUCCESS' or 'FAILED'")
         
@@ -88,13 +84,21 @@ class DB:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            end_time = datetime.datetime.now().isoformat()
+            end_time = datetime.datetime.utcnow().isoformat()
             
-            cursor.execute(
-                '''UPDATE tasks SET status = ?, end_time = ? 
-                WHERE resource_id = ? AND batch_id = ? AND status = 'RUNNING' ''',
-                (status, end_time, resource_id, batch_id)
-            )
+            # Only store error_message if status is FAILED
+            if status == 'FAILED' and error_message:
+                cursor.execute(
+                    '''UPDATE tasks SET status = ?, end_time = ?, error_message = ? 
+                    WHERE resource_id = ? AND batch_id = ? AND status = 'RUNNING' ''',
+                    (status, end_time, error_message, resource_id, batch_id)
+                )
+            else:
+                cursor.execute(
+                    '''UPDATE tasks SET status = ?, end_time = ? 
+                    WHERE resource_id = ? AND batch_id = ? AND status = 'RUNNING' ''',
+                    (status, end_time, resource_id, batch_id)
+                )
             
             if cursor.rowcount == 0:
                 logger.warning(f"No running task found for resource_id={resource_id}, batch_id={batch_id}")
@@ -118,7 +122,7 @@ class DB:
             cursor = conn.cursor()
             
             cursor.execute(
-                '''SELECT resource_id, batch_id, start_time, end_time, status 
+                '''SELECT resource_id, batch_id, start_time, end_time, status, error_message 
                 FROM tasks 
                 WHERE status = 'FAILED' 
                 AND start_time >= ? AND start_time <= ?''',
@@ -153,9 +157,9 @@ class TaskTracker:
         """Mark a task as successfully completed"""
         return self.db.update_task_status(resource_id, batch_id, 'SUCCESS')
     
-    def mark_failed(self, resource_id: str, batch_id: str) -> bool:
-        """Mark a task as failed"""
-        return self.db.update_task_status(resource_id, batch_id, 'FAILED')
+    def mark_failed(self, resource_id: str, batch_id: str, error_message: str = None) -> bool:
+        """Mark a task as failed with optional error message"""
+        return self.db.update_task_status(resource_id, batch_id, 'FAILED', error_message)
     
     def get_failed_tasks(self, start_date: str, end_date: str) -> List[Dict[str, Any]]:
         """Get all failed tasks within the date range"""

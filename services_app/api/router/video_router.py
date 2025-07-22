@@ -3,25 +3,22 @@ from pydantic import BaseModel
 from typing import Any, Optional
 from pathlib import Path
 
-from core import video_pro, video_tag, video_detect, VideoProcessor
+from core import video_pro, video_tag, video_detect
 
 app = APIRouter(
-    prefix='video',
+    prefix='/video',
     tags=['Video']
 )
-
 
 class ResponseModel(BaseModel):
     success: bool
     data: Optional[Any] = None
     error: Optional[str] = None
 
-
 @app.post('/download', response_model=ResponseModel)
 async def download_video(url: str, output_path: str):
     try:
-        async with VideoProcessor() as processor:
-            result = await processor.download_video(url=url, output_path=output_path)
+        result = await video_pro.download_video(url=url, output_path=output_path)
         if not result:
             raise HTTPException(status_code=400, detail="Download failed")
 
@@ -34,7 +31,6 @@ async def download_video(url: str, output_path: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post('/shrink', response_model=ResponseModel)
 async def shrink_video(input_path: str, output_path: str):
@@ -71,7 +67,6 @@ async def video_tagging(input_path: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post('/delete', response_model=ResponseModel)
 async def delete_video(input_path: str):

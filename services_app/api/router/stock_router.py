@@ -130,6 +130,10 @@ async def send_tags(
     tags = flatten_to_list_dict(tags)
     if 'video_description' in tags:
         del tags['video_description']
+    if 'is_real' in tags:
+        del tags['is_real']
+    if 'time' in tags:
+        del tags['time']
 
     headers = {
         "Accept": "text/plain",

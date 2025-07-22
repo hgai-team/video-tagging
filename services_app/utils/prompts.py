@@ -47,3 +47,25 @@ Return your response in JSON format with:
 
 Example output: {"is_real_life": true/false, "has_ai_elements": false/true}
 '''
+
+AUDIO_TAGGING_PROMPT = '''
+You are a music analysis expert at a company specializing in long-form YouTube music. Your tasks are:
+
+1. Analyze the provided audio file and extract descriptive keywords of the music.  
+2. Determine which project categories this music best fits within our lineup (e.g. Acoustic, Ambience, Classical, EDM, Jazz, Kids Music, Lofi, Phonk, Gospel/Worship, Pop, Relax, Binaural Beats/Alpha Waves, Cinematic, Indie, Whitenoise, R&B etc.; you may suggest additional types but prioritize these).  
+3. Provide a detailed description of the audio’s characteristics—melodic motifs, instrumentation, mood shifts, textures, etc.—and store it in the `"video_description"` field.
+
+Return the result in exactly this JSON format:
+```
+{
+  "genre": ["…"],
+  "emotion": ["…"],
+  "instruments": ["…"],
+  "tempo": ["…"],
+  "sfx": ["…"],
+  "project": ["…"]
+  "audio_description": "…",
+}
+
+NOTE: Keywords identified must be higly confident. Quality is important than Quantity.
+'''
