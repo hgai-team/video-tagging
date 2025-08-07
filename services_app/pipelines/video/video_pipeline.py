@@ -153,8 +153,8 @@ class VideoPipelineProcessor(BasePipelineProcessor):
             # Steps 7 & 8: Chạy song song các tác vụ gửi dữ liệu
             tasks = []
             tasks.append(send_tags(id=resource_id, tags=tags_data, tag_version=self.config.tag_version))
-            tasks.append(upsert_points(collection_name=self.config.collection_name, points=[tags_data], ids=[resource_id]))
-            tasks.append(self._upsert_stock_vector(tags_data, resource_id))
+            tasks.append(upsert_points(collection_name=self.config.collection_name, points=[tags_data], ids=[resource_id], media_type="video"))
+            tasks.append(self._upsert_stock_vector(tags_data, resource_id, media_type="video"))
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
 

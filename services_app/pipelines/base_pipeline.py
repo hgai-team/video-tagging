@@ -6,7 +6,6 @@ from typing import List, Dict, Tuple, Any
 import requests
 
 from api.router.stock_router import get_download_url
-from utils.db import task_tracker
 from config.settings import get_settings
 from .data_sources import BaseDataSource
 from config.config import PipelineConfig 
@@ -165,12 +164,17 @@ class BasePipelineProcessor(ABC):
             await self._process_media(file_info, batch_id)
             logger.info(f"Released semaphore for processing - resource_id={resource_id}")
             
-    async def _upsert_stock_vector(self, points: Dict, resource_id: str) -> Dict:
+    async def _upsert_stock_vector(self, points: Dict, resource_id: str, media_type: str) -> Dict:
         """Gửi vector với logic retry."""
         settings = get_settings()
         url = f"{settings.TAG_DOMAIN}af/collections/{self.config.collection_name}/points"
         headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
-        data = {"points": [points], "ids": [resource_id]}
+            
+        data = {
+            "points": [points], 
+            "ids": [resource_id],
+            "media_type": media_type
+        }
         max_retries = 5
 
         for attempt in range(max_retries):
@@ -178,10 +182,10 @@ class BasePipelineProcessor(ABC):
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     None,
-                    lambda: requests.put(url=url, headers=headers, json=data, timeout=60)
+                    lambda: requests.put(url=url, headers=headers, json=data, timeout=60, verify=False)
                 )
                 response.raise_for_status()
-                logger.info(f"Upsert stock vector success - resource_id={resource_id}")
+                logger.info(f"Upsert stock vector success - resource_id={resource_id}, media_type={media_type}")
                 return response.json()
             except requests.RequestException as e:
                 logger.warning(f"Upsert stock vector attempt {attempt + 1}/{max_retries} failed: {e}")

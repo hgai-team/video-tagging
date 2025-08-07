@@ -1,7 +1,6 @@
-from typing import List, Dict, Any, Query
-from fastapi import APIRouter, Path, HTTPException
+from typing import List, Dict, Any
+from fastapi import APIRouter, Path, HTTPException, Query
 from core import point_pro
-
 
 app = APIRouter(
     prefix='/tags',
@@ -16,7 +15,7 @@ async def upsert_points(
     collection_name: str = Path(...),
     points: List[Dict[str, Any]],
     ids: List[str],
-    media_type: str = Query(...)    
+    media_type: str = Query(None)    
     
 ):
     try:

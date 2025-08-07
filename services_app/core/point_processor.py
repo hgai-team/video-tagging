@@ -34,7 +34,7 @@ class PointProcessor:
             logger.exception(f"[embedding] Lỗi khi encode text: {e} | text: {text}")
             raise RuntimeError(f"Không thể tạo embedding: {e}")
         
-    def _detect_media_type(self, point: Dict[str, Any]) -> str:
+    def detect_media_type(self, point: Dict[str, Any]) -> str:
         
         if "audio_description" in point:
             return "audio"
@@ -45,7 +45,7 @@ class PointProcessor:
     async def handle_point(self, point: Dict[str, Any], id: str, media_type: str = None):
 
         if media_type is None:
-            media_type = self._detect_media_type(point)
+            media_type = self.detect_media_type(point)
         
         try:
             if media_type == "video":
@@ -99,10 +99,8 @@ class PointProcessor:
         return point_struct
         
     async def _handle_audio_point(self, point: Dict[str, Any], id: str):
-        """Xử lý point cho audio - logic mới với 3 vector."""
         audio_description = point.get("audio_description", "")
         
-        # 2. Lấy thông tin project
         project_info = ""
         if "project" in point and point["project"]:
             if isinstance(point["project"], list):
@@ -110,7 +108,6 @@ class PointProcessor:
             else:
                 project_info = str(point["project"])
         
-        # 3. Trích xuất tất cả tags còn lại
         tags = []
         for key, value in point.items():
             if key not in ["audio_description", "project", "is_real", "time"]:
@@ -118,6 +115,7 @@ class PointProcessor:
                     tags.extend([str(item) for item in value if item])
                 elif value:
                     tags.append(str(value))
+        
         tags_text = ", ".join(tags)
 
         point_struct = models.PointStruct(
@@ -195,33 +193,62 @@ class PointProcessor:
         
         logger.info(f"Đã tạo collection {collection_name} thành công với loại media: {media_type}")
 
-async def upsert_points(
-    self,
-    collection_name: str,
-    points: List[Dict[str, Any]],
-    ids: List[str],
-    media_type: str = None
-):
+    async def upsert_points(
+        self,
+        collection_name: str,
+        points: List[Dict[str, Any]],
+        ids: List[str],
+        media_type: str = None  # Thêm tham số media_type với giá trị mặc định là None
+    ):
+        """Thêm hoặc cập nhật các điểm vào collection. Có thể chỉ định loại media hoặc tự động phát hiện."""
 
-    if not self.client.collection_exists(collection_name):
-        # Xác định loại media nếu chưa được cung cấp
-        detected_media_type = media_type or self._detect_media_type(points[0])
-        await self.create_collection(collection_name=collection_name, media_type=detected_media_type)
+        if not self.client.collection_exists(collection_name):
+            # Xác định loại media nếu chưa được cung cấp
+            detected_media_type = media_type if media_type else self.detect_media_type(points[0])
+            await self.create_collection(collection_name=collection_name, media_type=detected_media_type)
 
-    try:
-        point_structs = []
-        detected_media_type = media_type or self._detect_media_type(points[0])
+        try:
+            point_structs = []
+            # Ưu tiên sử dụng media_type được cung cấp, nếu không thì tự phát hiện
+            detected_media_type = media_type if media_type else self.detect_media_type(points[0])
+            
+            for point, id in zip(points, ids):
+                point_structs.append(await self.handle_point(point, id, media_type=detected_media_type))
+
+            self.client.upsert(
+                collection_name=collection_name,
+                points=point_structs
+            )
+            return point_structs
+        except RuntimeError:
+            raise
+        except Exception as e:
+            logger.exception(f"[upsert_points] Lỗi không xác định khi upsert vào '{collection_name}': {e}")
+            raise RuntimeError(f"Lỗi khi upsert points vào '{collection_name}': {e}")
         
-        for point, id in zip(points, ids):
-            point_structs.append(await self.handle_point(point, id, media_type=detected_media_type))
+    async def delete_points(
+        self,
+        collection_name: str,
+        ids: List[str]
+    ):
 
-        self.client.upsert(
-            collection_name=collection_name,
-            points=point_structs
-        )
-        return point_structs
-    except RuntimeError:
-        raise
-    except Exception as e:
-        logger.exception(f"[upsert_points] Lỗi không xác định khi upsert vào '{collection_name}': {e}")
-        raise RuntimeError(f"Lỗi khi upsert points vào '{collection_name}': {e}")
+        try:
+            if not self.client.collection_exists(collection_name):
+                msg = f"Collection '{collection_name}' không tồn tại để xóa points."
+                logger.error(f"[delete_points] {msg}")
+                raise RuntimeError(msg)
+
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=models.PointIdsList(
+                    points=ids,
+                ),
+            )
+
+            return ids
+
+        except RuntimeError:
+            raise
+        except Exception as e:
+            logger.exception(f"[delete_points] Lỗi không xác định khi delete points từ '{collection_name}': {e}")
+            raise RuntimeError(f"Lỗi khi delete points từ '{collection_name}': {e}")

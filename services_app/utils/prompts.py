@@ -68,4 +68,5 @@ Return the result in exactly this JSON format:
 }
 
 NOTE: Keywords identified must be higly confident. Quality is important than Quantity.
+NOTE: If the audio is SFX, return values only for "sfx" and "audio_description"; all other fields must be empty lists.
 '''

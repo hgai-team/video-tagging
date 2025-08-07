@@ -21,7 +21,7 @@ class AudioProcessor:
     async def download_audio(self, url: str, output_path: str) -> bool:
         """Download audio from URL to local path (sync, blocking)."""
         try:
-            response = requests.get(url, timeout=self.timeout, stream=True)
+            response = requests.get(url, timeout=self.timeout, stream=True, verify=False)
             
             if response.status_code != 200:
                 logger.error(f"Download failed: HTTP {response.status_code}")
@@ -38,7 +38,7 @@ class AudioProcessor:
             if os.path.exists(output_path):
                 os.remove(output_path)
             raise RuntimeError(f"Download error: {str(e)}")    
-    
+            
     async def process_audio(self, input_path: str, output_path: str) -> bool:
         """
         Process audio file:

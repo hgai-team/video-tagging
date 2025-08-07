@@ -22,10 +22,9 @@ class VideoProcessor:
         return False
 
     async def download_video(self, url: str, output_path: str) -> bool:
-        """Download video from URL to local path (sync, blocking)."""
         try:
-            # Sử dụng requests đồng bộ để tải xuống
-            response = requests.get(url, timeout=self.timeout, stream=True)
+            # Sử dụng verify=False để bỏ qua kiểm tra chứng chỉ SSL
+            response = requests.get(url, timeout=self.timeout, stream=True, verify=False)
             
             if response.status_code != 200:
                 logger.error(f"Download failed: HTTP {response.status_code}")
@@ -92,15 +91,12 @@ class VideoProcessor:
         try:
             width, height = await self._get_dimensions(input_path)
 
-            # Chọn filter scale
             if width >= height:
-                # landscape
                 if width > hd_limit:
                     scale = f"scale={hd_limit}:-2"
                 else:
                     scale = "scale=iw:-2"
             else:
-                # portrait
                 if height > hd_limit:
                     scale = f"scale=-2:{hd_limit}"
                 else:

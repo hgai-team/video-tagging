@@ -7,5 +7,7 @@ view.py
 *.py[cod]
 */data/*
 *.txt
-**/temp_videos/** 
+**/temp_media/** 
 **/logs/** 
+transfer.py
+**.snapshot

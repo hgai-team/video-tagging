@@ -7,9 +7,9 @@ BASE_VIDEO_DIR = BASE_MEDIA_DIR / "videos"
 BASE_AUDIO_DIR = BASE_MEDIA_DIR / "audios"
 TAG_VERSION = "v3"
 MIN_VIDEO_SIZE_MB = 0.2
-MIN_AUDIO_SIZE_MB = 0.2
+MIN_AUDIO_SIZE_MB = 0.01
 COLLECTION_NAME_VIDEO = "render_video_pro_collection"
-COLLECTION_NAME_AUDIO = "render_audio_pro_collection"
+COLLECTION_NAME_AUDIO = "render_audio_dev_collection"
 LOG_LEVEL = "INFO"
 
 @dataclass
@@ -22,7 +22,7 @@ class PipelineConfig:
     temp_dir: Path
     max_concurrent_downloads: int
     max_concurrent_processing: int
-    min_media_size_mb: int
+    min_media_size_mb: float
 
 UNLABELED_CONFIG_VIDEO = PipelineConfig(
     name="unlabeled_VIDEO",
@@ -32,7 +32,7 @@ UNLABELED_CONFIG_VIDEO = PipelineConfig(
     temp_dir=BASE_VIDEO_DIR / "unlabeled",
     max_concurrent_downloads=20,
     max_concurrent_processing=20,
-    min_media_size_mb=MIN_VIDEO_SIZE_MB,
+    min_media_size_mb=MIN_VIDEO_SIZE_MB
 )
 
 UNLABELED_CONFIG_AUDIO = PipelineConfig(
