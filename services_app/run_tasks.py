@@ -5,6 +5,11 @@ import seqlog
 from schedulers.app_scheduler import AppScheduler
 from config.config import LOG_LEVEL
 
+import urllib3
+from urllib3.exceptions import InsecureRequestWarning
+
+urllib3.disable_warnings(InsecureRequestWarning)
+
 logging.basicConfig(level=LOG_LEVEL)
 seqlog.log_to_seq(
     server_url="http://localhost:5341",
@@ -16,13 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 def setup_arg_parser():
-    """Thiết lập trình phân tích cú pháp tham số dòng lệnh."""
+    """Sets up the command-line argument parser."""
     parser = argparse.ArgumentParser(description="Run specific pipeline or the full scheduler.")
     parser.add_argument(
         'pipeline',
-        nargs='?',  # '?' có nghĩa là 0 hoặc 1 tham số
+        nargs='?',  # '?' means 0 or 1 argument
         type=int,
-        choices=[1, 2, 3, 4, 5, 6, 7], # 7 lựa chọn pipeline
+        choices=[1, 2, 3, 4, 5, 6, 7], # 7 pipeline options
         help="""Run a specific pipeline:
                 1=Unlabeled Video,
                 2=Unlabeled Audio,
@@ -43,13 +48,13 @@ async def main():
 
     scheduler = AppScheduler()
 
-    # Nếu có tham số pipeline được truyền vào, chỉ chạy pipeline đó và thoát
+    # If a pipeline argument is provided, run only that pipeline and exit
     if args.pipeline:
         logger.info(f"Running specified pipeline: {args.pipeline}")
 
         task_to_run = None
         
-        # Xử lý từng pipeline cụ thể
+        # Handle each specific pipeline
         if args.pipeline == 1:
             task_to_run = scheduler._run_unlabeled_video_pipeline()
             logger.info("--> Running: Unlabeled Video Pipeline")
@@ -82,7 +87,7 @@ async def main():
     try:
         scheduler.start()
 
-        # Chạy tất cả các job một lần khi khởi động
+        # Run all jobs once at startup
         await scheduler.run_initial_jobs()
 
         # Keep the application running

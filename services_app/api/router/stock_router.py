@@ -11,6 +11,39 @@ app = APIRouter(
     tags=['Stocks']
 )
 
+@app.post(
+    '/resources/removed'
+)
+async def get_unlabel_resources(
+    *,
+    media_type: int,
+    start_date: str,
+    end_date: str
+):
+    payload = {
+        "mediaType": media_type,
+        "startDate": start_date,
+        "endDate": end_date,
+    }
+    headers = {
+        "Accept": "text/plain",
+        "X-Time-Zone": "Asia/Bangkok",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.post(
+            url=get_settings().REMOVED_URL,
+            headers=headers,
+            json=payload
+        )
+
+        if response.status_code == 200:
+            return response.json()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get(
     '/resources/unlabel',
 )

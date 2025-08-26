@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any, Optional
@@ -56,7 +57,8 @@ async def video_tagging(input_path: str):
         if not path.exists():
             raise HTTPException(status_code=404, detail="Input file not found")
 
-        video_bytes = path.read_bytes()
+        # Read file bytes asynchronously to prevent blocking
+        video_bytes = await asyncio.to_thread(path.read_bytes)
         tags = await video_tag.chat(video_bytes=video_bytes)
         return {
             "success": True,
@@ -75,7 +77,8 @@ async def delete_video(input_path: str):
         if not path.exists():
             raise HTTPException(status_code=404, detail="File not found")
 
-        path.unlink()
+        # Delete file asynchronously to prevent blocking
+        await asyncio.to_thread(path.unlink)
         return {
             "success": True,
             "data": {"message": "File deleted"},
@@ -93,7 +96,8 @@ async def detect_real_or_ai(input_path: str):
         if not path.exists():
             raise HTTPException(status_code=404, detail="File not found")
 
-        video_bytes = path.read_bytes()
+        # Read file bytes asynchronously to prevent blocking
+        video_bytes = await asyncio.to_thread(path.read_bytes)
         detection_result = await video_detect.detect(video_bytes=video_bytes)
         
         return {

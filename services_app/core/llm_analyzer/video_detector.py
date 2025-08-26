@@ -1,6 +1,4 @@
 import asyncio
-import logging
-
 from google import genai
 from google.genai import types
 
@@ -8,20 +6,17 @@ from config.settings import get_settings
 from utils.prompts import VIDEO_DETECTION_PROMPT
 from utils.parser import json_parser
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.FileHandler("./logs/video_detection.log"), logging.StreamHandler()]
-)
 
-class VideoDetection:
+class VideoDetector:
+    """Handles real vs AI-generated video detection."""
+    
     def __init__(self):
         self.client = genai.Client(
             api_key=get_settings().GOOGLEAI_API_KEY
         )
 
     async def detect(self, video_bytes):
+        """Detect if video is real or AI-generated."""
         try:
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
@@ -50,20 +45,20 @@ class VideoDetection:
                 
             text = part[0].text
             
-            # Parse kết quả JSON
+            # Parse JSON result
             result = json_parser(text)
             
-            # Xử lý kết quả theo yêu cầu
+            # Process result according to requirements
             # {"is_real_life": true, "has_ai_elements": false} => is_real = 1
-            # Các trường hợp khác => is_real = 0
+            # Other cases => is_real = 0
             is_real_life = result.get("is_real_life")
             has_ai_elements = result.get("has_ai_elements")
             
-            # Kiểm tra is_real_life là True/true và has_ai_elements là False/false
+            # Check if is_real_life is True/true and has_ai_elements is False/false
             is_real_life_true = is_real_life is True or is_real_life == "true" or is_real_life == "True"
             has_ai_elements_false = has_ai_elements is False or has_ai_elements == "false" or has_ai_elements == "False"
             
-            # Nếu điều kiện thỏa mãn thì is_real = 1, còn lại is_real = 0
+            # If conditions are met then is_real = 1, otherwise is_real = 0
             is_real = 1 if is_real_life_true and has_ai_elements_false else 0
             
             return {
@@ -72,5 +67,4 @@ class VideoDetection:
             }
             
         except Exception as e:
-            logger.error(f"Lỗi trong quá trình phát hiện video: {str(e)}", exc_info=True)
             raise RuntimeError(f"Phát hiện video thất bại: {str(e)}")

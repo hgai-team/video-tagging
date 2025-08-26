@@ -11,6 +11,7 @@ from .api_helpers import update_point_metadata_via_payload_api, update_multiple_
 from core import video_pro
 from pipelines.base_pipeline import BasePipelineProcessor
 from utils.db import task_tracker
+from utils.error_logger import log_download_error # Import the new function
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ async def get_video_duration(file_path: str) -> float:
         logger.error(f"Error getting video duration: {str(e)}")
         return 0
 
-class VideoPipelineProcessor(BasePipelineProcessor):
+class  VideoPipelineProcessor(BasePipelineProcessor):
 
     def _count_temp_files(self) -> int:
         return len([f for f in self.config.temp_dir.iterdir() if f.is_file() and f.suffix == '.mp4'])
@@ -73,8 +74,10 @@ class VideoPipelineProcessor(BasePipelineProcessor):
             download_url = next((url_data.get(f) for f in url_fields if f in url_data), None)
         
         if not download_url:
-            task_tracker.mark_failed(resource_id, batch_id)
-            logger.error(f"No download URL found for {resource_id}. Available fields: {list(url_data.keys() if isinstance(url_data, dict) else [])}")
+            error_msg = "No download URL found in url_data"
+            log_download_error(resource_id, "N/A", error_msg) # Log the error
+            task_tracker.mark_failed(resource_id, batch_id, error_msg)
+            logger.error(f"{error_msg} for {resource_id}. Available fields: {list(url_data.keys() if isinstance(url_data, dict) else [])}")
             if 'data' in url_data and isinstance(url_data['data'], dict):
                 logger.error(f"Data fields: {list(url_data['data'].keys())}")
             raise ValueError(f"No download URL found for {resource_id}")
@@ -87,10 +90,17 @@ class VideoPipelineProcessor(BasePipelineProcessor):
             result = await video_pro.download_video(url=download_url, output_path=str(output_path))
             
             if not result:
-                raise RuntimeError(f"Download failed with VideoProcessor result: {result}")
+                # This case is often covered by the exception below, but we keep it for safety
+                error_msg = "VideoProcessor download_video returned False"
+                log_download_error(resource_id, download_url, error_msg) # Log the error
+                task_tracker.mark_failed(resource_id, batch_id, error_msg)
+                raise RuntimeError(error_msg)
 
             if not output_path.exists():
-                raise FileNotFoundError(f"Downloaded file not found: {output_path}")
+                error_msg = f"Downloaded video file not found at path: {output_path}"
+                log_download_error(resource_id, download_url, error_msg) # Log the error
+                task_tracker.mark_failed(resource_id, batch_id, error_msg)
+                raise FileNotFoundError(error_msg)
 
             file_size_mb = output_path.stat().st_size / (1024 * 1024)
             logger.info(f"Downloaded file size for {resource_id}: {file_size_mb:.2f}MB")
@@ -106,8 +116,10 @@ class VideoPipelineProcessor(BasePipelineProcessor):
             }
 
         except Exception as e:
-            task_tracker.mark_failed(resource_id, batch_id)
-            logger.error(f"Download video failed - resource_id={resource_id}, error={e}", exc_info=True)
+            error_msg = str(e)
+            log_download_error(resource_id, download_url, error_msg) # Log any exception during download
+            task_tracker.mark_failed(resource_id, batch_id, error_msg)
+            logger.error(f"Download video failed - resource_id={resource_id}, error={error_msg}", exc_info=True)
             if output_path.exists():
                 try:
                     output_path.unlink() 
@@ -199,20 +211,19 @@ class VideoPipelineProcessor(BasePipelineProcessor):
 
             collection_name = kwargs.get('collection_name', self.config.collection_name)
             batch_size = kwargs.get('batch_size', 100)
-            offset = 0
             total_processed = 0
+            batch_number = 1
             
             while True:
-                logger.info(f"Getting batch at offset={offset} with size={batch_size} - batch_id={batch_id}")
+                logger.info(f"Getting batch #{batch_number} with size={batch_size} - batch_id={batch_id}")
                 context = {
                     "collection_name": collection_name,
-                    "batch_size": batch_size,
-                    "offset": offset
+                    "batch_size": batch_size
                 }
                 raw_resources = await self.data_source.get_resources(**context)
 
                 if not raw_resources or not isinstance(raw_resources, list) or len(raw_resources) == 0:
-                    logger.info(f"No more resources found at offset={offset} - batch_id={batch_id}")
+                    logger.info(f"No more resources found in batch #{batch_number} - batch_id={batch_id}")
                     break
 
                 resources = []
@@ -223,23 +234,19 @@ class VideoPipelineProcessor(BasePipelineProcessor):
                         resources.append((resource_id, duration))
 
                 if not resources:
-                    logger.warning(f"No valid resources after conversion at offset={offset} - batch_id={batch_id}")
-                    offset += batch_size
+                    logger.warning(f"No valid resources after conversion in batch #{batch_number} - batch_id={batch_id}")
+                    batch_number += 1
                     continue
 
-                logger.info(f"Getting download URLs for {len(resources)} resources at offset={offset} - batch_id={batch_id}")
+                logger.info(f"Getting download URLs for {len(resources)} resources in batch #{batch_number} - batch_id={batch_id}")
                 resources_with_urls = await self._get_download_urls_batch(resources, batch_id)
 
                 await self._process_with_file_management_detection(resources_with_urls, batch_id)
                 
                 total_processed += len(resources)
-                offset += batch_size
+                batch_number += 1
                 
-                logger.info(f"Processed batch at offset={offset-batch_size}, total processed so far: {total_processed} - batch_id={batch_id}")
-                
-                if len(resources) < batch_size:
-                    logger.info(f"Found {len(resources)} resources < batch_size {batch_size}, reached end of collection - batch_id={batch_id}")
-                    break
+                logger.info(f"Processed batch #{batch_number-1}, total processed so far: {total_processed} - batch_id={batch_id}")
 
             logger.info(f"Detection pipeline completed for all resources, total processed: {total_processed} - batch_id={batch_id}")
 
@@ -285,8 +292,11 @@ class VideoPipelineProcessor(BasePipelineProcessor):
                         for item in batch:
                             task_tracker.mark_success(item['resource_id'], batch_id)
                     else:
-                        logger.error(f"Batch update failed: {update_result.get('error')}")
+                        error_msg = f"Batch update failed: {update_result.get('error', 'Unknown error')}"
+                        logger.error(error_msg)
                         for item in batch:
+                            # Log each failed item to CSV
+                            log_download_error(item['resource_id'], "N/A", error_msg)
                             task_tracker.mark_failed(item['resource_id'], batch_id)
                 
                 # Cập nhật duration cho từng video
@@ -302,7 +312,11 @@ class VideoPipelineProcessor(BasePipelineProcessor):
                     logger.info(f"Updated time={duration} for resource_id={resource_id}")
                     
             except Exception as e:
-                logger.error(f"Batch update failed: {str(e)}")
+                error_msg = f"Batch update exception: {str(e)}"
+                logger.error(error_msg)
+                # Log error for all successful results that couldn't be updated
+                for result in successful_results:
+                    log_download_error(result['resource_id'], "N/A", error_msg)
         
         # Step 3: Dọn dẹp tất cả files
         cleanup_tasks = []
@@ -339,6 +353,20 @@ class VideoPipelineProcessor(BasePipelineProcessor):
             if downloaded_files:
                 await self._process_detection_files_batch(downloaded_files, batch_id)
                 
+    def _extract_download_url_from_file_info(self, file_info: Dict) -> str:
+        """Extract download URL from file_info for error logging."""
+        url_data = file_info.get('url_data', {})
+        if not url_data:
+            return "N/A"
+            
+        url_fields = ['url', 'download_url', 'downloadUrl', 'link', 'videoUrl']
+        download_url = next((url_data.get('data', {}).get(f) for f in url_fields if f in url_data.get('data', {})), None)
+        
+        if not download_url:
+            download_url = next((url_data.get(f) for f in url_fields if f in url_data), None)
+        
+        return download_url or "N/A"
+        
     async def _process_single_detection_video_concurrent(self, file_info: Dict, batch_id: str):
         """Xử lý một video detection bất đồng bộ và trả về kết quả."""
         resource_id = file_info['resource_id']
@@ -346,6 +374,7 @@ class VideoPipelineProcessor(BasePipelineProcessor):
         duration = file_info['duration']
         processed_path = str(self.config.temp_dir / f"{resource_id}_processed.mp4")
         cleanup_files = [('original', original_path), ('processed', processed_path)]
+        download_url = self._extract_download_url_from_file_info(file_info)
         
         try:
             # Shrink video
@@ -353,6 +382,11 @@ class VideoPipelineProcessor(BasePipelineProcessor):
             
             # Detection
             detection_result = await detect_real_or_ai(input_path=processed_path)
+            if not detection_result or not detection_result.get('success', False):
+                error_msg = f"Detection failed: {detection_result.get('error', 'Unknown error')}"
+                log_download_error(resource_id, download_url, error_msg)
+                raise RuntimeError(error_msg)
+                
             detection_data = detection_result.get('data', {})
             is_real = detection_data.get('is_real', 0)
             
@@ -365,7 +399,11 @@ class VideoPipelineProcessor(BasePipelineProcessor):
             }
             
         except Exception as e:
-            logger.error(f"Processing failed for resource_id={resource_id}: {str(e)}")
+            error_msg = str(e)
+            if "Detection failed" not in error_msg:
+                # Only log if not already logged above
+                log_download_error(resource_id, download_url, f"Processing failed: {error_msg}")
+            logger.error(f"Processing failed for resource_id={resource_id}: {error_msg}")
             task_tracker.mark_failed(resource_id, batch_id)
             return {
                 'resource_id': resource_id,

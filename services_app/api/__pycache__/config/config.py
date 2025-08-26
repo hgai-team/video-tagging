@@ -2,15 +2,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # --- Cấu hình chung ---
-BASE_MEDIA_DIR = Path("./temp_media")
-BASE_VIDEO_DIR = BASE_MEDIA_DIR / "videos"
-BASE_AUDIO_DIR = BASE_MEDIA_DIR / "audios"
-TAG_VERSION = "v3"
-MIN_VIDEO_SIZE_MB = 0.2
-MIN_AUDIO_SIZE_MB = 0.01
+BASE_MEDIA_DIR        = Path("./temp_media")
+BASE_VIDEO_DIR        = BASE_MEDIA_DIR / "videos"
+BASE_AUDIO_DIR        = BASE_MEDIA_DIR / "audios"
+TAG_VERSION           = "v3"
+MIN_VIDEO_SIZE_MB     = 0.2
+MIN_AUDIO_SIZE_MB     = 0.0001
 COLLECTION_NAME_VIDEO = "render_video_pro_collection"
-COLLECTION_NAME_AUDIO = "render_music_dev_collection"
-LOG_LEVEL = "INFO"
+COLLECTION_NAME_AUDIO = "render_music_pro_collection"
+LOG_LEVEL             = "INFO"
 
 @dataclass
 class PipelineConfig:
@@ -43,8 +43,8 @@ UNLABELED_CONFIG_AUDIO = PipelineConfig(
     tag_version=TAG_VERSION,
     media_type=1,
     temp_dir=BASE_AUDIO_DIR / "unlabeled",
-    max_concurrent_downloads=20,
-    max_concurrent_processing=20,
+    max_concurrent_downloads=40,
+    max_concurrent_processing=40,
     min_media_size_mb=MIN_AUDIO_SIZE_MB,
     log_file_name="unlabeled_AUDIO.log"
 )
@@ -67,8 +67,8 @@ OLD_VERSION_CONFIG_AUDIO = PipelineConfig(
     tag_version=TAG_VERSION,
     media_type=1,
     temp_dir=BASE_AUDIO_DIR / "old_version",
-    max_concurrent_downloads=10,
-    max_concurrent_processing=10,
+    max_concurrent_downloads=40,
+    max_concurrent_processing=40,
     min_media_size_mb=MIN_AUDIO_SIZE_MB,
     log_file_name="old_version_AUDIO.log"
 )
@@ -103,8 +103,8 @@ REAL_DETECTION_CONFIG = PipelineConfig(
     tag_version=TAG_VERSION,
     media_type=2,
     temp_dir=BASE_VIDEO_DIR / "real_detection_VIDEO",
-    max_concurrent_downloads=50,
-    max_concurrent_processing=50,
+    max_concurrent_downloads=20,
+    max_concurrent_processing=20,
     min_media_size_mb=MIN_VIDEO_SIZE_MB,
     log_file_name="real_detection_VIDEO.log"
 )

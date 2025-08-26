@@ -3,7 +3,12 @@ import uvicorn
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
+import urllib3
+from urllib3.exceptions import InsecureRequestWarning
+
 from api.endpoints import app as tagging_endpoints
+
+urllib3.disable_warnings(InsecureRequestWarning)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

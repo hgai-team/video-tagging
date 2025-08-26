@@ -2,15 +2,15 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 import requests
 
 from api.router.stock_router import get_download_url
 from config.settings import get_settings
 from .data_sources import BaseDataSource
-from config.config import PipelineConfig 
-
-logger = logging.getLogger(__name__)
+from config.config import PipelineConfig
+from utils.logger_utils import setup_pipeline_logger
+from utils.error_logger import log_download_error
 
 class BasePipelineProcessor(ABC):
     
@@ -20,7 +20,17 @@ class BasePipelineProcessor(ABC):
         self.processing_semaphore = asyncio.Semaphore(config.max_concurrent_processing)
         self.config.temp_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info(
+        # Setup dedicated logger for this pipeline
+        self.logger = setup_pipeline_logger(
+            logger_name=f"{self.__class__.__name__}_{config.name}",
+            log_file_name=config.log_file_name
+        )
+        
+        # Add sets to track processed and failed IDs for the current run
+        self.processed_ids = set()
+        self.failed_download_ids = set()
+        
+        self.logger.info(
             f"{self.__class__.__name__} initialized with: "
             f"max_downloads={config.max_concurrent_downloads},"
             f"max_processing={config.max_concurrent_processing},"
@@ -29,43 +39,73 @@ class BasePipelineProcessor(ABC):
 
     async def run(self, **kwargs: Any):
         batch_id = f"{self.config.name}_batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        logger.info(f"Starting batch - batch_id={batch_id}")
+        self.logger.info(f"Starting batch - batch_id={batch_id}")
+        
+        # Clear the processed and failed IDs sets at the beginning of each run
+        self.processed_ids.clear()
+        self.failed_download_ids.clear()
 
         try:
             await self._batch_cleanup_temp_folder(batch_id)
 
-            # Step 1: Lấy danh sách resource
-            logger.info(f"Step 1: Getting resources - batch_id={batch_id}")
-            context = {
-                "media_type": self.config.media_type,
-                "collection_name": self.config.collection_name,
-                "current_tag_version": self.config.tag_version,
-                **kwargs
-            }
-            raw_resources = await self.data_source.get_resources(**context)
+            batch_size = kwargs.get('batch_size', 200)
+            offset = 0
+            total_processed = 0
+            
+            while True:
+                self.logger.info(f"Step 1: Getting resources batch at offset={offset} with size={batch_size} - batch_id={batch_id}")
+                context = {
+                    "media_type": self.config.media_type,
+                    "collection_name": self.config.collection_name,
+                    "current_tag_version": self.config.tag_version,
+                    "batch_size": batch_size,
+                    "offset": offset,
+                    **kwargs
+                }
+                raw_resources = await self.data_source.get_resources(**context)
 
-            if not raw_resources or not isinstance(raw_resources, list):
-                logger.warning(f"No resources found from data source - batch_id={batch_id}")
-                return
+                if not raw_resources or not isinstance(raw_resources, list) or len(raw_resources) == 0:
+                    self.logger.info(f"No more resources found at offset={offset} - batch_id={batch_id}")
+                    break
 
-            resources_with_duration = self._prepare_resources_by_duration(raw_resources, batch_id)
-            if not resources_with_duration:
-                logger.warning(f"No valid resources after filtering - batch_id={batch_id}")
-                return
+                # Filter out resources that have already been processed in this run
+                resources_to_process = [res for res in raw_resources if res.get('id') not in self.processed_ids]
+                
+                if not resources_to_process:
+                    self.logger.warning(f"No new valid resources to process at offset={offset} after filtering processed IDs - batch_id={batch_id}")
+                    offset += len(raw_resources) # Adjust offset by original count
+                    continue
 
-            logger.info(f"Found {len(resources_with_duration)} valid resources to process.")
+                resources_with_duration = self._prepare_resources_by_duration(resources_to_process, batch_id)
+                if not resources_with_duration:
+                    self.logger.warning(f"No valid resources after duration filtering at offset={offset} - batch_id={batch_id}")
+                    offset += len(raw_resources)
+                    continue
 
-            # Step 2: Lấy URL download
-            logger.info(f"Step 2: Getting download URLs - batch_id={batch_id}")
-            resources_with_urls = await self._get_download_urls_batch(resources_with_duration, batch_id)
+                self.logger.info(f"Found {len(resources_with_duration)} valid resources to process at offset={offset}.")
 
-            # Other steps: Tải và xử lý media
-            await self._process_with_file_management(resources_with_urls, batch_id)
+                # Mark all IDs in this batch as processed to prevent reprocessing
+                for resource_id, _ in resources_with_duration:
+                    self.processed_ids.add(resource_id)
+                
+                self.logger.info(f"Step 2: Getting download URLs - batch_id={batch_id}")
+                resources_with_urls = await self._get_download_urls_batch(resources_with_duration, batch_id)
 
-            logger.info(f"Batch processing completed successfully - batch_id={batch_id}")
+                await self._process_with_file_management(resources_with_urls, batch_id)
+                
+                total_processed += len(resources_with_duration)
+                offset += len(raw_resources) # Always advance offset by the number of items fetched
+                
+                self.logger.info(f"Processed batch at offset={offset-len(raw_resources)}, total processed so far: {total_processed} - batch_id={batch_id}")
+                
+                if len(raw_resources) < batch_size:
+                    self.logger.info(f"Fetched {len(raw_resources)} resources < batch_size {batch_size}, reached end of collection - batch_id={batch_id}")
+                    break
+
+            self.logger.info(f"Batch processing completed successfully, total processed: {total_processed} - batch_id={batch_id}")
 
         except Exception as e:
-            logger.error(f"Pipeline batch failed critically - batch_id={batch_id}, error={e}", exc_info=True)
+            self.logger.error(f"Pipeline batch failed critically - batch_id={batch_id}, error={e}", exc_info=True)
             raise
 
     def _prepare_resources_by_duration(self, resource_data: List[Dict], batch_id: str) -> List[Tuple[str, int]]:
@@ -76,34 +116,43 @@ class BasePipelineProcessor(ABC):
             if resource_id and duration > 0:
                 resources.append((resource_id, duration))
             elif resource_id:
-                logger.debug(f"Skipping resource with zero duration - batch_id={batch_id}, resource_id={resource_id}")
+                self.logger.debug(f"Skipping resource with zero duration - batch_id={batch_id}, resource_id={resource_id}")
 
         resources.sort(key=lambda x: x[1])
         return resources
 
     async def _get_download_urls_batch(self, resources: List[Tuple[str, int]], batch_id: str) -> List[Dict]:
-        logger.info(f"Starting to fetch {len(resources)} URLs concurrently. This may take a while...")
+        self.logger.info(f"Starting to fetch {len(resources)} URLs concurrently")
         tasks = [self._get_download_url_safe(res_id, dur, batch_id) for res_id, dur in resources]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks)
 
         valid_resources = []
+        failed_resources_ids = []
+        
         for i, result in enumerate(results):
             resource_id, duration = resources[i]
-            if not isinstance(result, Exception):
+            if result is not None:
                 valid_resources.append({'resource_id': resource_id, 'duration': duration, 'url_data': result})
-
-        logger.info(f"Got {len(valid_resources)} valid download URLs - batch_id={batch_id}")
+            else:
+                failed_resources_ids.append(resource_id)
+        
+        if failed_resources_ids:
+            # Add failed IDs to the failed set for logging and CSV export
+            for res_id in failed_resources_ids:
+                self.failed_download_ids.add(res_id)
+            self.logger.warning(f"Skipped {len(failed_resources_ids)} resources due to download URL errors: {failed_resources_ids[:5]}{'...' if len(failed_resources_ids) > 5 else ''}")
+            
+        self.logger.info(f"Got {len(valid_resources)}/{len(resources)} valid download URLs - batch_id={batch_id}")
         return valid_resources
 
     async def _process_with_file_management(self, resources: List[Dict], batch_id: str):
-        """Quản lý việc tải và xử lý theo từng đợt."""
         remaining_resources = resources.copy()
         while remaining_resources:
             current_files = self._count_temp_files()
             available_slots = self.config.max_concurrent_downloads - current_files
 
             if available_slots <= 0:
-                logger.warning(f"Tiến hành xóa toàn bộ file để giải phóng không gian.")
+                self.logger.warning(f"Proceeding to clear all files to free up space.")
                 
                 temp_files = self._get_temp_files_list()
                 
@@ -112,60 +161,90 @@ class BasePipelineProcessor(ABC):
                 
                 current_files = self._count_temp_files()
                 available_slots = self.config.max_concurrent_downloads - current_files
-                logger.info(f"Sau khi dọn dẹp, thư mục tạm còn {current_files} files, {available_slots} slots trống.")
+                self.logger.info(f"After cleanup, temp folder has {current_files} files, {available_slots} slots available.")
                 
                 if available_slots <= 0:
-                    logger.error(f"Thư mục tạm vẫn đầy sau khi dọn dẹp. Còn {len(remaining_resources)} resources chưa xử lý.")
+                    self.logger.error(f"Temp folder is still full after cleanup. {len(remaining_resources)} resources remaining unprocessed.")
                     break
 
             to_download = remaining_resources[:available_slots]
             remaining_resources = remaining_resources[available_slots:]
 
-            logger.info(f"Downloading batch of {len(to_download)} files. Remaining: {len(remaining_resources)}.")
+            self.logger.info(f"Downloading batch of {len(to_download)} files. Remaining: {len(remaining_resources)}.")
             downloaded_files = await self._download_batch(to_download, batch_id)
 
             if downloaded_files:
                 await self._process_media_files(downloaded_files, batch_id)
     
     async def _download_batch(self, resources: List[Dict], batch_id: str) -> List[Dict]:
-        """Tải một loạt media."""
+        self.logger.info(f"Starting to download batch with {len(resources)} resources")
+        
+        resource_ids = [res['resource_id'] for res in resources]
+        self.logger.info(f"Resources to download: {resource_ids}")
+        
         tasks = [
             self._download_media_safe(
                 res['resource_id'], res['url_data'], res['duration'], batch_id
             ) for res in resources
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        valid_files = [res for res in results if not isinstance(res, Exception)]
-        logger.info(f"Successfully downloaded {len(valid_files)}/{len(resources)} files for batch - batch_id={batch_id}")
+        
+        valid_files = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                resource_id = resources[i]['resource_id']
+                # Add failed ID to the failed set for logging and CSV export
+                self.failed_download_ids.add(resource_id)
+                self.logger.error(f"Download failed for {resource_id}: {str(result)}")
+            else:
+                valid_files.append(result)
+        
+        self.logger.info(f"Successfully downloaded {len(valid_files)}/{len(resources)} files for batch - batch_id={batch_id}")
+        
         return valid_files
         
-    async def _get_download_url_safe(self, resource_id: str, duration: int, batch_id: str) -> Dict:
-        """Lấy URL download một cách an toàn."""
+    async def _get_download_url_safe(self, resource_id: str, duration: int, batch_id: str) -> Optional[Dict]:
+        """Gets the download URL for a resource, without pre-validation."""
         try:
             result = await get_download_url(id=resource_id)
-            logger.info(f"Successfully fetched URL for resource_id: {resource_id}")
+            if not result:
+                error_msg = "URL fetch returned None"
+                log_download_error(resource_id, "N/A", error_msg)
+                self.logger.warning(f"URL fetch returned None for resource_id={resource_id}, skipping.")
+                return None
+            
             return result
         except Exception as e:
-            logger.error(f"Get download URL failed - batch_id={batch_id}, resource_id={resource_id}, error={e}")
-            raise
+            error_msg = f"Get download URL failed: {str(e)}"
+            log_download_error(resource_id, "N/A", error_msg)
+            self.logger.warning(f"Get download URL failed - resource_id={resource_id}, error={e}")
+            return None
+    
+    def _extract_download_url_from_result(self, result: Dict) -> Optional[str]:
+        if not result or not isinstance(result, dict):
+            return None
+            
+        url_fields = ['url', 'download_url', 'downloadUrl', 'link', 'videoUrl', 'audioUrl']
+        
+        url = next((result.get('data', {}).get(f) for f in url_fields if f in result.get('data', {})), None)
+        if not url:
+            url = next((result.get(f) for f in url_fields if f in result), None)
+            
+        return url
 
     async def _process_media_files(self, downloaded_files: List[Dict], batch_id: str):
-        """Xử lý đồng thời một danh sách các file đã được tải xuống."""
-        logger.info(f"Processing {len(downloaded_files)} downloaded files - batch_id={batch_id}")
+        self.logger.info(f"Processing {len(downloaded_files)} downloaded files - batch_id={batch_id}")
         tasks = [self._process_single_media_concurrent(file_info, batch_id) for file_info in downloaded_files]
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _process_single_media_concurrent(self, file_info: Dict, batch_id: str):
-        """Wrapper để kiểm soát số lượng xử lý đồng thời bằng semaphore."""
         resource_id = file_info['resource_id']
         async with self.processing_semaphore:
-            logger.info(f"Acquired semaphore for processing - resource_id={resource_id}")
+            self.logger.info(f"Acquired semaphore for processing - resource_id={resource_id}")
             await self._process_media(file_info, batch_id)
-            logger.info(f"Released semaphore for processing - resource_id={resource_id}")
+            self.logger.info(f"Released semaphore for processing - resource_id={resource_id}")
             
     async def _upsert_stock_vector(self, points: Dict, resource_id: str, media_type: str) -> Dict:
-        """Gửi vector với logic retry."""
         settings = get_settings()
         url = f"{settings.TAG_DOMAIN}af/collections/{self.config.collection_name}/points"
         headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
@@ -185,17 +264,16 @@ class BasePipelineProcessor(ABC):
                     lambda: requests.put(url=url, headers=headers, json=data, timeout=60, verify=False)
                 )
                 response.raise_for_status()
-                logger.info(f"Upsert stock vector success - resource_id={resource_id}, media_type={media_type}")
+                self.logger.info(f"Upsert stock vector success - resource_id={resource_id}, media_type={media_type}")
                 return response.json()
             except requests.RequestException as e:
-                logger.warning(f"Upsert stock vector attempt {attempt + 1}/{max_retries} failed: {e}")
+                self.logger.warning(f"Upsert stock vector attempt {attempt + 1}/{max_retries} failed: {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
 
         raise RuntimeError(f"Upsert stock vector failed after {max_retries} retries for resource {resource_id}")
     
     async def _batch_cleanup_temp_folder(self, batch_id: str):
-        """Dọn dẹp các file cũ hơn 1 giờ trong thư mục tạm."""
         try:
             old_files = []
             current_time = datetime.now().timestamp()
@@ -208,44 +286,36 @@ class BasePipelineProcessor(ABC):
                         old_files.append(file_path)
 
             if old_files:
-                logger.warning(f"Found {len(old_files)} old temp files, cleaning up - batch_id={batch_id}")
+                self.logger.warning(f"Found {len(old_files)} old temp files, cleaning up - batch_id={batch_id}")
                 for file_path in old_files:
                     try:
                         file_path.unlink()
-                        logger.info(f"Cleaned old file: {file_path}")
+                        self.logger.info(f"Cleaned old file: {file_path}")
                     except OSError as e:
-                        logger.error(f"Failed to clean old file {file_path}: {e}")
+                        self.logger.error(f"Failed to clean old file {file_path}: {e}")
         except Exception as e:
-            logger.error(f"Batch temp cleanup failed - batch_id={batch_id}, error={e}")
+            self.logger.error(f"Batch temp cleanup failed - batch_id={batch_id}, error={e}")
 
-    # Các phương thức trừu tượng mà lớp con phải triển khai
-    
     @abstractmethod
     def _count_temp_files(self) -> int:
-        """Đếm số file media trong thư mục tạm."""
         pass
         
     @abstractmethod
     def _get_file_patterns(self) -> List[str]:
-        """Lấy danh sách các pattern để tìm files (*.mp4, *.mp3, etc.)"""
         pass
         
     @abstractmethod
     def _get_temp_files_list(self) -> List[Tuple[str, str]]:
-        """Lấy danh sách các file tạm để dọn dẹp."""
         pass
     
     @abstractmethod
     async def _download_media_safe(self, resource_id: str, url_data: Dict, duration: int, batch_id: str) -> Dict:
-        """Tải media an toàn."""
         pass
         
     @abstractmethod
     async def _process_media(self, file_info: Dict, batch_id: str):
-        """Xử lý một file media."""
         pass
         
     @abstractmethod
     async def _cleanup_media_files(self, cleanup_files: List[Tuple[str, str]], resource_id: str, batch_id: str = None):
-        """Dọn dẹp files."""
         pass

@@ -1,6 +1,6 @@
-services:
+git services:
   qdrant-tagging:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.14.1
     ports:
       - 5333:6333
       - 5334:6334

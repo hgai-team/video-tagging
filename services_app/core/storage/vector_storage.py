@@ -1,49 +1,41 @@
 import os
 import torch
-import logging
-
 from qdrant_client import QdrantClient, models
-from typing import List, Dict,Any
-
+from typing import List, Dict, Any
 from sentence_transformers import SentenceTransformer
 
 from config.settings import get_settings
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.FileHandler("./logs/point_processor.log"), logging.StreamHandler()]
-)
 
-class PointProcessor:
+class VectorStorage:
+    """Handles vector database operations and embedding generation."""
+    
     def __init__(self):
-        self.model = SentenceTransformer(os.path.join(os.getcwd(), get_settings().MODEL_PATH), device='cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = SentenceTransformer(
+            os.path.join(os.getcwd(), get_settings().MODEL_PATH), 
+            device='cuda' if torch.cuda.is_available() else 'cpu'
+        )
         self.client = QdrantClient(
             host=get_settings().QDRANT_HOST,
             port=get_settings().QDRANT_PORT
         )
 
-    async def embedding(
-        self,
-        text: str
-    ):
+    async def embedding(self, text: str):
+        """Generate embedding for text."""
         try:
             return self.model.encode(text).tolist()
         except Exception as e:
-            logger.exception(f"[embedding] Lỗi khi encode text: {e} | text: {text}")
             raise RuntimeError(f"Không thể tạo embedding: {e}")
         
     def detect_media_type(self, point: Dict[str, Any]) -> str:
-        
+        """Detect media type from point data."""
         if "audio_description" in point:
             return "audio"
-        
         elif "video_description" in point:
             return "video"
 
     async def handle_point(self, point: Dict[str, Any], id: str, media_type: str = None):
-
+        """Process point data and create PointStruct for vector storage."""
         if media_type is None:
             media_type = self.detect_media_type(point)
         
@@ -62,15 +54,13 @@ class PointProcessor:
             
             return point_struct
             
-        except RuntimeError as re:
-            logger.error(f"[handle_point] RuntimeError id={id}: {re}")
+        except RuntimeError:
             raise
         except Exception as e:
-            logger.exception(f"[handle_point] Unexpected error với id={id}: {e}")
             raise RuntimeError(f"Lỗi khi xử lý point id={id}: {e}")
 
     async def _handle_video_point(self, point: Dict[str, Any], id: str):
-
+        """Handle video point processing."""
         def extract_list_strings(obj):
             strings = []
             if isinstance(obj, dict):
@@ -99,18 +89,12 @@ class PointProcessor:
         return point_struct
         
     async def _handle_audio_point(self, point: Dict[str, Any], id: str):
+        """Handle audio point processing."""
         audio_description = point.get("audio_description", "")
-        
-        project_info = ""
-        if "project" in point and point["project"]:
-            if isinstance(point["project"], list):
-                project_info = ", ".join([str(p) for p in point["project"] if p])
-            else:
-                project_info = str(point["project"])
         
         tags = []
         for key, value in point.items():
-            if key not in ["audio_description", "project", "is_real", "time"]:
+            if key not in ["audio_description", "is_real", "time"]:
                 if isinstance(value, list):
                     tags.extend([str(item) for item in value if item])
                 elif value:
@@ -122,7 +106,6 @@ class PointProcessor:
             id=id,
             vector={
                 'description': await self.embedding(text=audio_description),
-                'project': await self.embedding(text=project_info),
                 'tags': await self.embedding(text=tags_text)
             },
             payload=point
@@ -131,7 +114,7 @@ class PointProcessor:
         return point_struct
 
     async def create_collection(self, collection_name: str, media_type: str):
-
+        """Create a new collection for the specified media type."""
         if media_type not in ["video", "audio"]:
             raise ValueError('media_type phải là "video" hoặc "audio"')
         
@@ -152,13 +135,7 @@ class PointProcessor:
                     distance=models.Distance.COSINE,
                     on_disk=True,
                     datatype=models.Datatype.FLOAT32,
-                ),
-                'project': models.VectorParams(
-                    size=get_settings().VECTOR_SIZE,
-                    distance=models.Distance.COSINE,
-                    on_disk=True,
-                    datatype=models.Datatype.FLOAT32,
-                ),
+                ),                
                 'tags': models.VectorParams(
                     size=get_settings().VECTOR_SIZE,
                     distance=models.Distance.COSINE,
@@ -166,7 +143,6 @@ class PointProcessor:
                     datatype=models.Datatype.FLOAT32,
                 )
             }
-            logger.info(f"Tạo collection audio '{collection_name}' với 3 vector: description, project, tags")
         else: 
             vectors_config = {
                 'description': models.VectorParams(
@@ -182,7 +158,6 @@ class PointProcessor:
                     datatype=models.Datatype.FLOAT32,
                 )
             }
-            logger.info(f"Tạo collection video '{collection_name}' với 2 vector: description, keywords")
         
         self.client.create_collection(
             collection_name=collection_name,
@@ -190,26 +165,23 @@ class PointProcessor:
             optimizers_config=optimizers_config,
             hnsw_config=hnsw_config,
         )
-        
-        logger.info(f"Đã tạo collection {collection_name} thành công với loại media: {media_type}")
 
     async def upsert_points(
         self,
         collection_name: str,
         points: List[Dict[str, Any]],
         ids: List[str],
-        media_type: str = None  # Thêm tham số media_type với giá trị mặc định là None
+        media_type: str = None 
     ):
-        """Thêm hoặc cập nhật các điểm vào collection. Có thể chỉ định loại media hoặc tự động phát hiện."""
-
+        """Add or update points in collection."""
         if not self.client.collection_exists(collection_name):
-            # Xác định loại media nếu chưa được cung cấp
+            # Determine media type if not provided
             detected_media_type = media_type if media_type else self.detect_media_type(points[0])
             await self.create_collection(collection_name=collection_name, media_type=detected_media_type)
 
         try:
             point_structs = []
-            # Ưu tiên sử dụng media_type được cung cấp, nếu không thì tự phát hiện
+            # Prioritize provided media_type, otherwise auto-detect
             detected_media_type = media_type if media_type else self.detect_media_type(points[0])
             
             for point, id in zip(points, ids):
@@ -223,7 +195,6 @@ class PointProcessor:
         except RuntimeError:
             raise
         except Exception as e:
-            logger.exception(f"[upsert_points] Lỗi không xác định khi upsert vào '{collection_name}': {e}")
             raise RuntimeError(f"Lỗi khi upsert points vào '{collection_name}': {e}")
         
     async def delete_points(
@@ -231,12 +202,10 @@ class PointProcessor:
         collection_name: str,
         ids: List[str]
     ):
-
+        """Delete points from collection."""
         try:
             if not self.client.collection_exists(collection_name):
-                msg = f"Collection '{collection_name}' không tồn tại để xóa points."
-                logger.error(f"[delete_points] {msg}")
-                raise RuntimeError(msg)
+                raise RuntimeError(f"Collection '{collection_name}' không tồn tại để xóa points.")
 
             self.client.delete(
                 collection_name=collection_name,
@@ -250,5 +219,4 @@ class PointProcessor:
         except RuntimeError:
             raise
         except Exception as e:
-            logger.exception(f"[delete_points] Lỗi không xác định khi delete points từ '{collection_name}': {e}")
             raise RuntimeError(f"Lỗi khi delete points từ '{collection_name}': {e}")

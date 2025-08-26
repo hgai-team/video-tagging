@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from pipelines.video.video_pipeline import VideoPipelineProcessor
 from pipelines.audio.audio_pipeline import AudioPipelineProcessor
-from pipelines.data_sources import UnlabeledDataSource, OldVersionDataSource, MissUpsertDataSource, TaggedUnclassifiedDataSource
+from pipelines.data_sources import UnlabeledDataSource, OldVersionDataSource, MissUpsertDataSource, TaggedUnclassifiedDataSource, TxtFileDataSource
 from config.config import (
     UNLABELED_CONFIG_VIDEO, UNLABELED_CONFIG_AUDIO,
     OLD_VERSION_CONFIG_VIDEO, OLD_VERSION_CONFIG_AUDIO,
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class AppScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler()
-        self.local_tz = timezone(timedelta(hours=7))  # UTC+7
+        self.local_tz = timezone(timedelta(hours=7))
         self.bangkok_tz = ZoneInfo("Asia/Bangkok")
 
     async def _run_unlabeled_video_pipeline(self):
@@ -44,7 +44,7 @@ class AppScheduler:
 
         logger.info(f"Starting unlabeled VIDEO pipeline job for window #{index}")
         processor_video = VideoPipelineProcessor(UNLABELED_CONFIG_VIDEO, UnlabeledDataSource())
-        await processor_video.run(start_date=formatted_start_date, end_date=formatted_end_date)
+        await processor_video.run(start_date=formatted_start_date, end_date=formatted_end_date, batch_size=200)
 
     async def _run_unlabeled_audio_pipeline(self):
         """Job for unlabeled audio resources."""
@@ -129,13 +129,13 @@ class AppScheduler:
         logger.info("Starting video detection pipeline job")
         processor = VideoPipelineProcessor(
             REAL_DETECTION_CONFIG, 
-            TaggedUnclassifiedDataSource()
+            TxtFileDataSource()
         )
-        await processor.run_detection(batch_size=200)
+        await processor.run_detection(batch_size=40)
 
     def start(self):
         """Add all jobs to the scheduler and start it."""
-        # Video Jobs - chạy vào giờ chẵn
+        # Video Jobs - runs on even hours
         self.scheduler.add_job(
             self._run_unlabeled_video_pipeline,
             CronTrigger(hour="0,2,4,6,8,10,12,14,16,18,20,22", minute=0, timezone=self.local_tz),
@@ -157,14 +157,14 @@ class AppScheduler:
             name='Miss Upsert Video Pipeline on even hours (UTC+7)'
         )
         
-        # Audio Jobs - chạy vào giờ lẻ
+        # Audio Jobs - runs on odd hours
         self.scheduler.add_job(
             self._run_unlabeled_audio_pipeline,
             CronTrigger(hour="1,3,5,7,9,11,13,15,17,19,21,23", minute=0, timezone=self.local_tz),
             id='unlabeled_audio_pipeline_job',
             name='Unlabeled Audio Pipeline on odd hours (UTC+7)'
         )
-
+        
         self.scheduler.add_job(
             self._run_old_version_audio_pipeline,
             CronTrigger(hour="3,7,11,15,19,23", minute=0, timezone=self.bangkok_tz),
@@ -179,7 +179,7 @@ class AppScheduler:
             name='Miss Upsert Audio Pipeline on odd hours (UTC+7)'
         )
         
-        # Detection Job - chạy mỗi ngày
+        # Detection Job - runs daily
         self.scheduler.add_job(
             self._run_detection_pipeline,
             CronTrigger(hour="2", minute=30, timezone=self.local_tz), 

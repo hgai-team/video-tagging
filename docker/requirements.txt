@@ -10,3 +10,5 @@ qdrant_client
 sentence_transformers
 
 pydub
+
+essential
